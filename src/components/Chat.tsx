@@ -355,6 +355,19 @@ export default function Chat({ externalInput }: { externalInput?: string }) {
       voiceService.stop();
       setIsVoiceActive(false);
     } else {
+      const supportsSpeech =
+        !!(window as any).SpeechRecognition || !!(window as any).webkitSpeechRecognition;
+      if (!supportsSpeech) {
+        const browserMsg: Message = {
+          id: Date.now().toString(),
+          role: 'assistant',
+          content: 'שיחה קולית זמינה רק בדפדפן Chrome. אנא פתח את האפליקציה ב-Chrome כדי להשתמש בפיצ\'ר זה.',
+          timestamp: Date.now(),
+        };
+        setMessages((prev) => [...prev, browserMsg]);
+        return;
+      }
+
       setIsVoiceActive(true);
       await voiceService.start({
         history: messages,
