@@ -137,19 +137,18 @@ async function startServer() {
 
     geminiWs.on("open", () => {
       console.log("Connected to Gemini Live WebSocket");
-      // Send setup message
       const setup = {
         setup: {
-          model: "models/gemini-2.0-flash-live-001",
-          generationConfig: {
-            responseModalities: ["AUDIO"],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: { voiceName: "Charon" },
-              },
+          model: "models/gemini-2.0-flash",
+          generation_config: {
+            response_modalities: ["AUDIO"],
+          },
+          speech_config: {
+            voice_config: {
+              prebuilt_voice_config: { voice_name: "Charon" },
             },
           },
-          systemInstruction: {
+          system_instruction: {
             parts: [{ text: SYSTEM_PROMPT }],
           },
         },
