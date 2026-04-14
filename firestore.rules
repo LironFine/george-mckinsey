@@ -1,0 +1,58 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: usage
+    // Document ID: {date}_{visitorId}
+    // Fields:
+    //   - count: number (required, 1-100) - messages sent today
+    //   - lastUpdate: timestamp (required) - last update time
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // Domain Validator for Usage
+    function isValidUsage(data) {
+      return hasRequiredFields(['count', 'lastUpdate']) &&
+             hasOnlyAllowedFields(['count', 'lastUpdate']) &&
+             data.count is number &&
+             data.count >= 1 &&
+             data.count <= 100 &&
+             data.lastUpdate is timestamp;
+    }
+
+    match /usage/{usageId} {
+      // Allow public access to usage tracking for rate limiting
+      // We identify visitors by a random ID stored in localStorage
+      allow get: if true;
+      allow create: if isValidUsage(request.resource.data) &&
+                      request.resource.data.count == 1;
+      // Prevent count from being reset or decreased (only allow incrementing)
+      allow update: if isValidUsage(request.resource.data) &&
+                      request.resource.data.count == resource.data.count + 1;
+    }
+    
+    // Default deny
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}

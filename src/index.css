@@ -1,0 +1,57 @@
+@import url('https://fonts.googleapis.com/css2?family=Assistant:wght@300;400;600;700&family=Inter:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", "Assistant", ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  html {
+    direction: rtl;
+  }
+  
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased;
+  }
+}
+
+.chat-bubble-user {
+  @apply bg-blue-600 text-white rounded-2xl rounded-tr-none px-3 py-1.5 sm:px-4 sm:py-2 max-w-[92%] self-start shadow-sm;
+}
+
+.chat-bubble-assistant {
+  @apply bg-white text-slate-800 rounded-2xl rounded-tl-none px-3 py-1.5 sm:px-4 sm:py-2 max-w-[92%] self-end shadow-sm border border-slate-100;
+}
+
+.markdown-body {
+  @apply text-inherit leading-relaxed;
+}
+
+.markdown-body p {
+  @apply mb-1.5 last:mb-0;
+}
+
+.markdown-body ul, .markdown-body ol {
+  @apply mb-4 mr-4 space-y-2;
+}
+
+.markdown-body li {
+  @apply relative pr-5;
+}
+
+.markdown-body ul li::before {
+  content: "•";
+  @apply absolute right-0 text-blue-600 font-bold text-lg leading-none top-0.5;
+}
+
+.markdown-body ol {
+  list-style-type: decimal;
+}
+
+.markdown-body strong {
+  @apply font-bold text-blue-800;
+}
+
+.glass-panel {
+  @apply bg-white/80 backdrop-blur-md border border-white/20 shadow-xl;
+}

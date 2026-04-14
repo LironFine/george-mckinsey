@@ -1,0 +1,27 @@
+{
+  "entities": {
+    "usage": {
+      "title": "Usage Tracking",
+      "description": "Tracks daily usage per user/IP to enforce limits.",
+      "type": "object",
+      "properties": {
+        "count": {
+          "type": "number",
+          "description": "Number of messages sent today."
+        },
+        "lastUpdate": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last time the usage was updated."
+        }
+      },
+      "required": ["count", "lastUpdate"]
+    }
+  },
+  "firestore": {
+    "/usage/{usageId}": {
+      "schema": "usage",
+      "description": "Daily usage records keyed by date_ip."
+    }
+  }
+}
