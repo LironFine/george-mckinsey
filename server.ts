@@ -142,10 +142,10 @@ async function startServer() {
           model: "models/gemini-2.0-flash",
           generation_config: {
             response_modalities: ["AUDIO"],
-          },
-          speech_config: {
-            voice_config: {
-              prebuilt_voice_config: { voice_name: "Charon" },
+            speech_config: {
+              voice_config: {
+                prebuilt_voice_config: { voice_name: "Charon" },
+              },
             },
           },
           system_instruction: {
