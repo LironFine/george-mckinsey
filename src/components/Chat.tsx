@@ -39,15 +39,7 @@ export default function Chat({ externalInput }: { externalInput?: string }) {
 
   useEffect(() => {
     scrollToBottom();
-    
-    // If voice is active, send the latest message to the voice session as context
-    if (isVoiceActive && messages.length > 0) {
-      const lastMessage = messages[messages.length - 1];
-      if (lastMessage.role === 'user') {
-        voiceService.sendTextMessage(`עדכון מהצ'אט: ${lastMessage.content}`);
-      }
-    }
-  }, [messages, isVoiceActive]);
+  }, [messages]);
 
   const handleSend = async (contentOverride?: string) => {
     const messageContent = contentOverride || input;
@@ -363,42 +355,41 @@ export default function Chat({ externalInput }: { externalInput?: string }) {
       voiceService.stop();
       setIsVoiceActive(false);
     } else {
-      // Pre-check: ask the server if voice is available before starting
-      try {
-        const check = await fetch("/api/voice-token", { method: "POST" });
-        const data = await check.json();
-        if (data.voiceDisabled) {
-          const infoMsg: Message = {
-            id: Date.now().toString(),
-            role: "assistant",
-            content:
-              "שיחה קולית אינה זמינה בסביבה זו. הסיבה: Gemini Live API דורש מפתח API עם גישה ל-ephemeral tokens, שאינה כלולה בחשבון החינמי הנוכחי. ניתן להמשיך בצ'אט הטקסטואלי כרגיל.",
-            timestamp: Date.now(),
-          };
-          setMessages((prev) => [...prev, infoMsg]);
-          return;
-        }
-      } catch {
-        // If the check itself fails, let voiceService handle the error
-      }
-
       setIsVoiceActive(true);
       await voiceService.start({
         history: messages,
+        onTranscription: (text, role) => {
+          const msg: Message = {
+            id: Date.now().toString() + Math.random(),
+            role: role === 'model' ? 'assistant' : 'user',
+            content: text,
+            timestamp: Date.now(),
+          };
+          setMessages((prev) => [...prev, msg]);
+        },
         onError: (err) => {
           console.error(err);
           setIsVoiceActive(false);
           const errMsg: Message = {
             id: Date.now().toString(),
-            role: "assistant",
-            content:
-              "לא ניתן היה להפעיל את השיחה הקולית. אנא המשך בצ'אט הטקסטואלי.",
+            role: 'assistant',
+            content: err?.message || 'לא ניתן היה להפעיל את השיחה הקולית. אנא המשך בצ\'אט הטקסטואלי.',
             timestamp: Date.now(),
           };
           setMessages((prev) => [...prev, errMsg]);
         },
         onClose: () => {
           setIsVoiceActive(false);
+        },
+        onLimitReached: (resetDays) => {
+          setIsVoiceActive(false);
+          const limitMsg: Message = {
+            id: Date.now().toString(),
+            role: 'assistant',
+            content: `הגעת למכסת השיחות הקוליות החודשית שלך (${30} שיחות). המכסה תתחדש בעוד ${resetDays} ימים. ניתן להמשיך בצ'אט הטקסטואלי ללא הגבלה.`,
+            timestamp: Date.now(),
+          };
+          setMessages((prev) => [...prev, limitMsg]);
         },
       });
     }
