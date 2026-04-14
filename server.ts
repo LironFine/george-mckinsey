@@ -3,24 +3,19 @@ import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
+import { createServer as createHttpServer } from "http";
+import { WebSocketServer } from "ws";
+import { GoogleGenAI, Modality } from "@google/genai";
 import { SYSTEM_PROMPT } from "./src/constants";
-// NOTE: No Google SDK imports — we use direct fetch() calls instead.
-// The SDK has compatibility issues in this sandbox environment.
-// Direct REST calls to the Gemini API work correctly.
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 
   app.use(express.json());
-
-  // Health check endpoint
-  app.get("/api/health", (req, res) => {
-    res.json({ status: "ok", timestamp: new Date().toISOString() });
-  });
 
   // Helper to get the API key safely and cleaned
   const getApiKey = () => {
@@ -31,12 +26,17 @@ async function startServer() {
     return key.trim().replace(/["']/g, "");
   };
 
+  // Health check endpoint
+  app.get("/api/health", (req, res) => {
+    res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
+
   // API endpoint for text chat — uses direct REST fetch, no SDK
   app.post("/api/chat", async (req, res) => {
     console.log(`Chat request received: ${JSON.stringify(req.body).substring(0, 100)}...`);
     try {
       const { messages } = req.body;
-      
+
       if (!messages || !Array.isArray(messages)) {
         return res.status(400).json({ error: "פורמט הודעות לא תקין" });
       }
@@ -50,7 +50,6 @@ async function startServer() {
         });
       }
 
-      // Use gemini-flash-latest — confirmed working in this environment
       const model = "gemini-flash-latest";
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
@@ -94,58 +93,6 @@ async function startServer() {
     }
   });
 
-  // Voice endpoint — generates an ephemeral token for Gemini Live API.
-  // The real API key stays on the server; the browser only receives a short-lived token.
-  app.post("/api/voice-token", async (req, res) => {
-    const apiKey = getApiKey();
-    if (!apiKey) {
-      return res.status(500).json({ error: "מפתח ה-API חסר בשרת." });
-    }
-
-    try {
-      const expireTime = new Date(Date.now() + 30 * 60 * 1000).toISOString();
-
-      const tokenResponse = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateEphemeralToken?key=${apiKey}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            newSessionExpireTime: expireTime,
-            config: {
-              responseModalities: ["AUDIO"],
-              systemInstruction: {
-                parts: [{ text: SYSTEM_PROMPT }],
-              },
-              speechConfig: {
-                voiceConfig: {
-                  prebuiltVoiceConfig: { voiceName: "Charon" },
-                },
-              },
-            },
-          }),
-        }
-      );
-
-      if (!tokenResponse.ok) {
-        const errData = await tokenResponse.json().catch(() => ({}));
-        console.error("Ephemeral token error:", tokenResponse.status, errData);
-        return res.status(tokenResponse.status).json({
-          error: errData?.error?.message || "שגיאה ביצירת token קולי",
-        });
-      }
-
-      const data = await tokenResponse.json();
-      return res.json({ token: data.token });
-    } catch (error: any) {
-      console.error("Voice token error:", error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // NOTE: /api/config has been removed intentionally.
-  // The API key must never be sent to the browser.
-
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     try {
@@ -166,7 +113,111 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  // Create HTTP server (needed for WebSocket upgrade)
+  const server = createHttpServer(app);
+
+  // WebSocket proxy — connects frontend to Gemini Live API
+  // API key stays on the server; browser only sends/receives audio via our WS
+  const wss = new WebSocketServer({ server, path: "/api/voice-ws" });
+
+  wss.on("connection", async (ws) => {
+    console.log("Voice WebSocket connection opened");
+    const apiKey = getApiKey();
+
+    if (!apiKey) {
+      ws.send(JSON.stringify({ type: "error", error: "מפתח ה-API חסר בשרת." }));
+      ws.close();
+      return;
+    }
+
+    let geminiSession: any = null;
+
+    try {
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: { apiVersion: "v1alpha" },
+      });
+
+      geminiSession = await ai.live.connect({
+        model: "models/gemini-2.0-flash-exp",
+        callbacks: {
+          onopen: () => {
+            console.log("Gemini Live session opened");
+            if (ws.readyState === ws.OPEN) {
+              ws.send(JSON.stringify({ type: "ready" }));
+            }
+          },
+          onmessage: (message: any) => {
+            if (ws.readyState === ws.OPEN) {
+              ws.send(JSON.stringify({ type: "message", data: message }));
+            }
+          },
+          onerror: (err: any) => {
+            console.error("Gemini Live error:", err);
+            if (ws.readyState === ws.OPEN) {
+              ws.send(
+                JSON.stringify({
+                  type: "error",
+                  error: err?.message || "שגיאה בשיחה הקולית",
+                })
+              );
+            }
+          },
+          onclose: () => {
+            console.log("Gemini Live session closed");
+            if (ws.readyState === ws.OPEN) ws.close();
+          },
+        },
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: {
+            voiceConfig: { prebuiltVoiceConfig: { voiceName: "Charon" } },
+          },
+          systemInstruction: SYSTEM_PROMPT,
+        },
+      });
+    } catch (err: any) {
+      console.error("Failed to create Gemini Live session:", err);
+      if (ws.readyState === ws.OPEN) {
+        ws.send(
+          JSON.stringify({
+            type: "error",
+            error: err?.message || "לא ניתן להפעיל שיחה קולית. אנא נסה שוב.",
+          })
+        );
+        ws.close();
+      }
+      return;
+    }
+
+    // Forward messages from browser → Gemini
+    ws.on("message", (data) => {
+      try {
+        const msg = JSON.parse(data.toString());
+        if (geminiSession && msg.payload) {
+          geminiSession.sendRealtimeInput(msg.payload);
+        }
+      } catch (e) {
+        console.error("Error forwarding WS message to Gemini:", e);
+      }
+    });
+
+    ws.on("close", () => {
+      console.log("Voice WebSocket connection closed");
+      try {
+        geminiSession?.close();
+      } catch {}
+    });
+
+    ws.on("error", (err) => {
+      console.error("Voice WebSocket error:", err);
+      try {
+        geminiSession?.close();
+      } catch {}
+    });
+  });
+
+  server.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 }

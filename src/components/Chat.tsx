@@ -7,7 +7,7 @@ import { Message } from '../types';
 import { sendMessageToGemini } from '../services/gemini';
 import { INITIAL_MESSAGE } from '../constants';
 import { voiceService } from '../services/voiceService';
-import { checkAndIncrementUsage } from '../services/usageService';
+import { checkAndIncrementUsage, checkAndIncrementVoiceUsage } from '../services/usageService';
 
 export default function Chat({ externalInput }: { externalInput?: string }) {
   const [messages, setMessages] = useState<Message[]>([
@@ -355,16 +355,32 @@ export default function Chat({ externalInput }: { externalInput?: string }) {
       voiceService.stop();
       setIsVoiceActive(false);
     } else {
-      const supportsSpeech =
-        !!(window as any).SpeechRecognition || !!(window as any).webkitSpeechRecognition;
-      if (!supportsSpeech) {
-        const browserMsg: Message = {
-          id: Date.now().toString(),
-          role: 'assistant',
-          content: 'שיחה קולית זמינה רק בדפדפן Chrome. אנא פתח את האפליקציה ב-Chrome כדי להשתמש בפיצ\'ר זה.',
-          timestamp: Date.now(),
-        };
-        setMessages((prev) => [...prev, browserMsg]);
+      // Check browser WebSocket support (all modern browsers support it, but just in case)
+      if (!window.WebSocket) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: Date.now().toString(),
+            role: 'assistant',
+            content: 'הדפדפן שלך אינו תומך בשיחה קולית. אנא השתמש ב-Chrome.',
+            timestamp: Date.now(),
+          } as Message,
+        ]);
+        return;
+      }
+
+      // Check monthly voice usage limit before starting
+      const { allowed, resetDays } = await checkAndIncrementVoiceUsage();
+      if (!allowed) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: Date.now().toString(),
+            role: 'assistant',
+            content: `הגעת למכסת השיחות הקוליות החודשית שלך (30 שיחות). המכסה תתחדש בעוד ${resetDays} ימים. ניתן להמשיך בצ'אט הטקסטואלי ללא הגבלה.`,
+            timestamp: Date.now(),
+          } as Message,
+        ]);
         return;
       }
 
@@ -393,16 +409,6 @@ export default function Chat({ externalInput }: { externalInput?: string }) {
         },
         onClose: () => {
           setIsVoiceActive(false);
-        },
-        onLimitReached: (resetDays) => {
-          setIsVoiceActive(false);
-          const limitMsg: Message = {
-            id: Date.now().toString(),
-            role: 'assistant',
-            content: `הגעת למכסת השיחות הקוליות החודשית שלך (${30} שיחות). המכסה תתחדש בעוד ${resetDays} ימים. ניתן להמשיך בצ'אט הטקסטואלי ללא הגבלה.`,
-            timestamp: Date.now(),
-          };
-          setMessages((prev) => [...prev, limitMsg]);
         },
       });
     }

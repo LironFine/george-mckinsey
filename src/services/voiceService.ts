@@ -1,16 +1,15 @@
-import { checkAndIncrementVoiceUsage } from './usageService';
-
 export class VoiceService {
-  private recognition: any = null;
-  private isActive: boolean = false;
-  private isSpeaking: boolean = false;
+  private ws: WebSocket | null = null;
+  private audioContext: AudioContext | null = null;
+  private workletNode: AudioWorkletNode | null = null;
+  private source: MediaStreamAudioSourceNode | null = null;
+  private stream: MediaStream | null = null;
+  private nextStartTime: number = 0;
+  private isConnected: boolean = false;
+  private activeSources: AudioBufferSourceNode[] = [];
   private history: { role: string; content: string }[] = [];
-  private callbacks: {
-    onTranscription?: (text: string, role: 'user' | 'model') => void;
-    onError?: (error: any) => void;
-    onClose?: () => void;
-    onLimitReached?: (resetDays: number) => void;
-  } = {};
+
+  constructor() {}
 
   getHistory() {
     return this.history;
@@ -18,179 +17,295 @@ export class VoiceService {
 
   async start(callbacks: {
     history?: any[];
-    onTranscription?: (text: string, role: 'user' | 'model') => void;
+    onTranscription?: (text: string, role: "user" | "model") => void;
     onError?: (error: any) => void;
     onClose?: () => void;
-    onLimitReached?: (resetDays: number) => void;
   }) {
-    if (this.isActive) return;
+    if (this.isConnected) return;
+    this.history = [];
 
-    const SpeechRecognitionAPI =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    try {
+      // Connect to our backend WebSocket proxy
+      // The backend holds the API key and proxies to Gemini Live
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const wsUrl = `${protocol}//${window.location.host}/api/voice-ws`;
 
-    if (!SpeechRecognitionAPI) {
-      callbacks.onError?.(
-        new Error('הדפדפן שלך אינו תומך בזיהוי קולי. אנא השתמש ב-Chrome.')
-      );
-      return;
-    }
+      this.ws = new WebSocket(wsUrl);
 
-    this.callbacks = callbacks;
-    this.history = callbacks.history ? [...callbacks.history] : [];
-    this.isActive = true;
-
-    this.startListening();
-  }
-
-  private startListening() {
-    if (!this.isActive || this.isSpeaking) return;
-
-    const SpeechRecognitionAPI =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-    this.recognition = new SpeechRecognitionAPI();
-    this.recognition.lang = 'he-IL';
-    this.recognition.continuous = false;
-    this.recognition.interimResults = false;
-    this.recognition.maxAlternatives = 1;
-
-    this.recognition.onresult = async (event: any) => {
-      const transcript = event.results[0][0].transcript.trim();
-      if (!transcript) return;
-      this.callbacks.onTranscription?.(transcript, 'user');
-      await this.sendToGemini(transcript);
-    };
-
-    this.recognition.onerror = (event: any) => {
-      if (event.error === 'no-speech' || event.error === 'aborted') {
-        if (this.isActive && !this.isSpeaking) {
-          setTimeout(() => this.startListening(), 300);
-        }
-        return;
-      }
-      if (event.error === 'not-allowed') {
-        this.callbacks.onError?.(
-          new Error('הרשאת מיקרופון נדחתה. אנא אפשר גישה למיקרופון בהגדרות הדפדפן.')
+      // Wait for "ready" signal — means Gemini session is open on the backend
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(
+          () => reject(new Error("פסק זמן בהתחברות לשרת הקולי")),
+          20000
         );
-        this.stop();
-        return;
-      }
-      console.error('Speech recognition error:', event.error);
-      if (this.isActive && !this.isSpeaking) {
-        setTimeout(() => this.startListening(), 500);
-      }
-    };
 
-    this.recognition.onend = () => {
-      if (this.isActive && !this.isSpeaking) {
-        setTimeout(() => this.startListening(), 300);
-      }
-    };
+        this.ws!.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg.type === "ready") {
+              clearTimeout(timeout);
+              resolve();
+            } else if (msg.type === "error") {
+              clearTimeout(timeout);
+              reject(new Error(msg.error));
+            } else if (msg.type === "message") {
+              this.handleGeminiMessage(msg.data, callbacks);
+            }
+          } catch {}
+        };
 
-    try {
-      this.recognition.start();
-    } catch {
-      // Already started
-    }
-  }
+        this.ws!.onerror = () => {
+          clearTimeout(timeout);
+          reject(new Error("שגיאה בחיבור לשרת הקולי"));
+        };
 
-  private async sendToGemini(text: string) {
-    const { allowed, resetDays } = await checkAndIncrementVoiceUsage();
-    if (!allowed) {
-      this.callbacks.onLimitReached?.(resetDays);
-      this.stop();
-      return;
-    }
-
-    try {
-      const messages = [
-        ...this.history.map((m) => ({
-          role: m.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: m.content }],
-        })),
-        { role: 'user', parts: [{ text }] },
-      ];
-
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages }),
+        this.ws!.onclose = () => {
+          clearTimeout(timeout);
+          if (!this.isConnected) {
+            reject(new Error("החיבור נסגר לפני שנפתח"));
+          } else {
+            this.isConnected = false;
+            callbacks.onClose?.();
+          }
+        };
       });
 
-      const data = await response.json();
-      if (data.text) {
-        this.history.push({ role: 'user', content: text });
-        this.history.push({ role: 'assistant', content: data.text });
-        this.callbacks.onTranscription?.(data.text, 'model');
-        this.speak(data.text);
+      // Switch to normal message handler once connected
+      this.ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === "message") {
+            this.handleGeminiMessage(msg.data, callbacks);
+          } else if (msg.type === "error") {
+            console.error("Gemini error:", msg.error);
+          }
+        } catch {}
+      };
+
+      this.ws.onclose = () => {
+        this.isConnected = false;
+        callbacks.onClose?.();
+      };
+
+      this.isConnected = true;
+
+      // Set up audio capture
+      this.audioContext = new (window.AudioContext ||
+        (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      this.source = this.audioContext.createMediaStreamSource(this.stream);
+
+      await this.audioContext.audioWorklet.addModule("/audio-processor.js");
+      this.workletNode = new AudioWorkletNode(
+        this.audioContext,
+        "microphone-processor"
+      );
+
+      this.workletNode.port.onmessage = (event) => {
+        if (!this.isConnected || !this.ws) return;
+        const { rms, channelData } = event.data;
+
+        // Interrupt AI speech when user starts talking
+        if (rms > 0.01) {
+          this.stopPlayback();
+        }
+
+        const pcmData = this.float32ToInt16(new Float32Array(channelData));
+        const base64Data = this.arrayBufferToBase64(pcmData.buffer);
+
+        try {
+          this.ws!.send(
+            JSON.stringify({
+              type: "audio",
+              payload: {
+                audio: { data: base64Data, mimeType: "audio/pcm;rate=16000" },
+              },
+            })
+          );
+        } catch (err) {
+          console.error("Error sending audio chunk:", err);
+        }
+      };
+
+      this.source.connect(this.workletNode);
+      this.workletNode.connect(this.audioContext.destination);
+
+      // Send greeting
+      setTimeout(() => {
+        if (this.isConnected && this.ws) {
+          this.ws.send(
+            JSON.stringify({
+              type: "text",
+              payload: {
+                text: "תפתח את השיחה עכשיו במשפט הבא בדיוק ואז תעצור ותקשיב: 'שלום, רצית לדבר איתי? אני כאן.'",
+              },
+            })
+          );
+        }
+      }, 800);
+
+      // Send prior chat history as context
+      const history = callbacks.history || [];
+      if (history.length > 0) {
+        setTimeout(() => {
+          if (!this.isConnected || !this.ws) return;
+          let historyText = history
+            .map(
+              (m: any) =>
+                `${m.role === "assistant" ? "ג'ורג' מקינזי" : "משתמש"}: ${m.content}`
+            )
+            .join("\n");
+          if (historyText.length > 10000) {
+            historyText =
+              historyText.substring(historyText.length - 10000) +
+              "... (היסטוריה מקוצרת)";
+          }
+          this.ws!.send(
+            JSON.stringify({
+              type: "text",
+              payload: {
+                text: `להלן היסטוריית השיחה עד כה. אנא המשך מהנקודה הזו:\n${historyText}`,
+              },
+            })
+          );
+        }, 1200);
       }
-    } catch (err: any) {
-      console.error('Gemini error in voice:', err);
-      if (this.isActive) {
-        setTimeout(() => this.startListening(), 500);
-      }
+    } catch (err) {
+      console.error("Failed to start voice session:", err);
+      callbacks.onError?.(err);
     }
   }
 
-  private speak(text: string) {
-    this.isSpeaking = true;
+  private handleGeminiMessage(
+    message: any,
+    callbacks: { onTranscription?: (text: string, role: "user" | "model") => void }
+  ) {
+    // Handle text content
+    if (message.serverContent?.modelTurn?.parts?.[0]?.text) {
+      const text = message.serverContent.modelTurn.parts[0].text;
+      this.history.push({ role: "assistant", content: text });
+      callbacks.onTranscription?.(text, "model");
+    }
 
-    try {
-      this.recognition?.stop();
-    } catch {}
+    // Handle audio content
+    const audioData =
+      message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
+    if (audioData) {
+      this.playAudioChunk(audioData);
+    }
 
-    // Strip markdown symbols for cleaner speech
-    const cleanText = text
-      .replace(/\*\*/g, '')
-      .replace(/\*/g, '')
-      .replace(/#+\s/g, '')
-      .replace(/\[.*?\]\(.*?\)/g, '')
-      .replace(/`/g, '')
-      .replace(/---/g, '')
-      .trim();
-
-    const utterance = new SpeechSynthesisUtterance(cleanText);
-    utterance.lang = 'he-IL';
-    utterance.rate = 1.0;
-    utterance.pitch = 1.0;
-
-    // Prefer Hebrew voice if available
-    const voices = window.speechSynthesis.getVoices();
-    const hebrewVoice = voices.find((v) => v.lang.startsWith('he'));
-    if (hebrewVoice) utterance.voice = hebrewVoice;
-
-    utterance.onend = () => {
-      this.isSpeaking = false;
-      if (this.isActive) {
-        setTimeout(() => this.startListening(), 500);
-      }
-    };
-
-    utterance.onerror = () => {
-      this.isSpeaking = false;
-      if (this.isActive) {
-        setTimeout(() => this.startListening(), 500);
-      }
-    };
-
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(utterance);
+    // Handle interruptions
+    if (message.serverContent?.interrupted) {
+      this.stopPlayback();
+    }
   }
 
-  // Kept for API compatibility — no-op in this implementation
-  async sendTextMessage(_text: string) {}
+  private playAudioChunk(base64Data: string) {
+    if (!this.audioContext) return;
+
+    const binaryString = atob(base64Data);
+    const len = binaryString.length;
+    const bytes = new Int16Array(len / 2);
+    for (let i = 0; i < len; i += 2) {
+      bytes[i / 2] =
+        (binaryString.charCodeAt(i + 1) << 8) | binaryString.charCodeAt(i);
+    }
+
+    const float32Data = new Float32Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) {
+      float32Data[i] = bytes[i] / 32768.0;
+    }
+
+    const audioBuffer = this.audioContext.createBuffer(
+      1,
+      float32Data.length,
+      24000
+    );
+    audioBuffer.getChannelData(0).set(float32Data);
+
+    const source = this.audioContext.createBufferSource();
+    source.buffer = audioBuffer;
+
+    const gainNode = this.audioContext.createGain();
+    gainNode.gain.value = 0.95;
+
+    source.connect(gainNode);
+    gainNode.connect(this.audioContext.destination);
+
+    source.onended = () => {
+      this.activeSources = this.activeSources.filter((s) => s !== source);
+    };
+    this.activeSources.push(source);
+
+    const currentTime = this.audioContext.currentTime;
+    if (this.nextStartTime < currentTime) {
+      this.nextStartTime = currentTime + 0.1;
+    }
+    source.start(this.nextStartTime);
+    this.nextStartTime += audioBuffer.duration;
+  }
+
+  private stopPlayback() {
+    this.activeSources.forEach((source) => {
+      try {
+        source.stop();
+      } catch {}
+    });
+    this.activeSources = [];
+    this.nextStartTime = 0;
+  }
+
+  async sendTextMessage(text: string) {
+    if (!this.isConnected || !this.ws) return;
+    try {
+      this.ws.send(JSON.stringify({ type: "text", payload: { text } }));
+    } catch (err) {
+      console.error("Failed to send text to voice session:", err);
+    }
+  }
 
   stop() {
-    this.isActive = false;
-    this.isSpeaking = false;
+    this.isConnected = false;
 
     try {
-      this.recognition?.stop();
+      this.ws?.close();
     } catch {}
-    this.recognition = null;
+    this.ws = null;
 
-    window.speechSynthesis.cancel();
-    this.callbacks.onClose?.();
+    if (this.workletNode) {
+      this.workletNode.disconnect();
+      this.workletNode = null;
+    }
+    if (this.source) {
+      this.source.disconnect();
+      this.source = null;
+    }
+    if (this.stream) {
+      this.stream.getTracks().forEach((track) => track.stop());
+      this.stream = null;
+    }
+    if (this.audioContext) {
+      this.audioContext.close();
+      this.audioContext = null;
+    }
+  }
+
+  private float32ToInt16(buffer: Float32Array): Int16Array {
+    let l = buffer.length;
+    const buf = new Int16Array(l);
+    while (l--) {
+      buf[l] = Math.min(1, buffer[l]) * 0x7fff;
+    }
+    return buf;
+  }
+
+  private arrayBufferToBase64(buffer: ArrayBuffer): string {
+    let binary = "";
+    const bytes = new Uint8Array(buffer);
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
   }
 }
 
