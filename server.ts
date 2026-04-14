@@ -94,14 +94,53 @@ async function startServer() {
     }
   });
 
-  // Voice endpoint — Gemini Live requires ephemeral tokens which are not
-  // available on free-tier API keys. Voice is disabled; text chat works fully.
-  app.post("/api/voice-token", (req, res) => {
-    res.status(503).json({
-      error:
-        "שירות השיחה הקולית אינו זמין בסביבה זו. Gemini Live API דורש חשבון עם גישה ל-ephemeral tokens. אנא השתמש בצ'אט הטקסטואלי.",
-      voiceDisabled: true,
-    });
+  // Voice endpoint — generates an ephemeral token for Gemini Live API.
+  // The real API key stays on the server; the browser only receives a short-lived token.
+  app.post("/api/voice-token", async (req, res) => {
+    const apiKey = getApiKey();
+    if (!apiKey) {
+      return res.status(500).json({ error: "מפתח ה-API חסר בשרת." });
+    }
+
+    try {
+      const expireTime = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+
+      const tokenResponse = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateEphemeralToken?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            newSessionExpireTime: expireTime,
+            config: {
+              responseModalities: ["AUDIO"],
+              systemInstruction: {
+                parts: [{ text: SYSTEM_PROMPT }],
+              },
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: { voiceName: "Charon" },
+                },
+              },
+            },
+          }),
+        }
+      );
+
+      if (!tokenResponse.ok) {
+        const errData = await tokenResponse.json().catch(() => ({}));
+        console.error("Ephemeral token error:", tokenResponse.status, errData);
+        return res.status(tokenResponse.status).json({
+          error: errData?.error?.message || "שגיאה ביצירת token קולי",
+        });
+      }
+
+      const data = await tokenResponse.json();
+      return res.json({ token: data.token });
+    } catch (error: any) {
+      console.error("Voice token error:", error);
+      res.status(500).json({ error: error.message });
+    }
   });
 
   // NOTE: /api/config has been removed intentionally.
