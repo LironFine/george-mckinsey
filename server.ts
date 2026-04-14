@@ -133,16 +133,17 @@ async function startServer() {
     let geminiSession: any = null;
 
     try {
+      console.log("Creating Gemini Live session...");
       const ai = new GoogleGenAI({
         apiKey,
         httpOptions: { apiVersion: "v1alpha" },
       });
 
       geminiSession = await ai.live.connect({
-        model: "models/gemini-2.0-flash-exp",
+        model: "models/gemini-2.0-flash-live-001",
         callbacks: {
           onopen: () => {
-            console.log("Gemini Live session opened");
+            console.log("Gemini Live session opened successfully");
             if (ws.readyState === ws.OPEN) {
               ws.send(JSON.stringify({ type: "ready" }));
             }
@@ -153,7 +154,7 @@ async function startServer() {
             }
           },
           onerror: (err: any) => {
-            console.error("Gemini Live error:", err);
+            console.error("Gemini Live session error:", JSON.stringify(err));
             if (ws.readyState === ws.OPEN) {
               ws.send(
                 JSON.stringify({
