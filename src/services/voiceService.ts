@@ -83,8 +83,13 @@ export class VoiceService {
       };
 
       this.ws.onclose = () => {
+        const wasConnected = this.isConnected;
         this.isConnected = false;
-        callbacks.onClose?.();
+        if (wasConnected) {
+          callbacks.onError?.(new Error("השיחה הקולית הסתיימה באופן בלתי צפוי. אנא נסה שוב."));
+        } else {
+          callbacks.onClose?.();
+        }
       };
 
       this.isConnected = true;

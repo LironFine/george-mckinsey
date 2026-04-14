@@ -174,7 +174,9 @@ async function startServer() {
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: "Charon" } },
           },
-          systemInstruction: SYSTEM_PROMPT,
+          systemInstruction: {
+            parts: [{ text: SYSTEM_PROMPT }],
+          },
         },
       });
     } catch (err: any) {
