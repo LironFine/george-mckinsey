@@ -28,14 +28,9 @@ export default function Chat({ externalInput, user }: { externalInput?: string; 
   const [isWaitingForName, setIsWaitingForName] = useState(false);
   const [isVoiceActive, setIsVoiceActive] = useState(false);
   const voiceStartTimeRef = useRef<number>(0);
-  // When true, the next voice transcription from the user is captured as the client name
-  const isWaitingForVoiceNameRef = useRef(false);
   // Always-fresh messages ref — updated synchronously every render so voice
-  // callbacks always read the latest messages, even before React re-renders
+  // callbacks (onClose) always read the latest messages, even before React re-renders
   const messagesRef = useRef<Message[]>(messages);
-  // Stores a snapshot of voiceHistory taken at the moment the command fired,
-  // so the name-collection flow can use the same snapshot
-  const pendingVoiceHistoryRef = useRef<{ role: string; content: string }[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   // Debounce timer for Firestore auto-save
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -381,14 +376,8 @@ ${voiceUserLines.join('\n')}
     }
   };
 
-  // ── Always-fresh refs — updated on every render so voice callbacks
-  // never hold a stale closure over state or handler functions ─────────────
-  messagesRef.current = messages;                                    // ← keep in sync with every render
-  const handleUpdateClientFileRef = useRef<typeof handleUpdateClientFile>(handleUpdateClientFile);
-  handleUpdateClientFileRef.current = handleUpdateClientFile;
-  const clientNameRef = useRef(clientName);
-  clientNameRef.current = clientName;
-  // ─────────────────────────────────────────────────────────────────────────
+  // Keep messagesRef in sync every render so onClose can read latest messages
+  messagesRef.current = messages;
 
   const handleDownloadBrief = async () => {
     if (messages.length <= 1 || isLoading) return;
@@ -515,41 +504,7 @@ ${voiceUserLines.join('\n')}
 
       await voiceService.start({
         history: messages,
-        onVoiceCommand: (command) => {
-          if (command === 'updateClientFile') {
-            // Snapshot both data sources NOW, before any echo feedback
-            // (George's "בסדר, מכין" through the mic) can pollute them
-            const voiceSnap = [...voiceService.getHistory()];
-            const msgsSnap  = messagesRef.current;
-
-            if (clientNameRef.current) {
-              // Name already known — George's system prompt says "בסדר, מכין"
-              // automatically; we just trigger the actual file generation
-              handleUpdateClientFileRef.current(undefined, msgsSnap, voiceSnap);
-            } else {
-              // Name unknown — ask George to ask the user for their name;
-              // stash the snapshot so it can be used when the name arrives
-              isWaitingForVoiceNameRef.current = true;
-              pendingVoiceHistoryRef.current = voiceSnap;
-              voiceService.sendTextMessage(
-                "המשתמש ביקש להכין תיק לקוח אבל אנחנו לא יודעים את שמו. " +
-                "אמור: 'בסדר. מה שמך?' ותחכה לתשובה."
-              );
-            }
-          }
-        },
         onTranscription: (text, role) => {
-          // Waiting for user to say their name via voice
-          if (role === 'user' && isWaitingForVoiceNameRef.current) {
-            isWaitingForVoiceNameRef.current = false;
-            setClientName(text);
-            const snap = pendingVoiceHistoryRef.current;
-            pendingVoiceHistoryRef.current = [];
-            // Small delay so setClientName propagates before handleUpdateClientFile reads it
-            setTimeout(() => handleUpdateClientFileRef.current(text, messagesRef.current, snap), 100);
-            return;
-          }
-
           const voiceMsg: Message = {
             id: `voice-${Date.now()}-${Math.random().toString(36).slice(2)}`,
             role: role === 'model' ? 'assistant' : 'user',
@@ -575,7 +530,7 @@ ${voiceUserLines.join('\n')}
           recordVoiceUsage(voiceStartTimeRef.current);
           setIsVoiceActive(false);
           // Immediate cloud-save when voice ends (bypass the 2 s debounce)
-          if (user) saveSession(user.uid, messagesRef.current, clientNameRef.current);
+          if (user) saveSession(user.uid, messagesRef.current, clientName);
         },
       });
     }

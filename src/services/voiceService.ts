@@ -24,7 +24,6 @@ export class VoiceService {
   async start(callbacks: {
     history?: any[];
     onTranscription?: (text: string, role: "user" | "model") => void;
-    onVoiceCommand?: (command: "updateClientFile") => void;
     onError?: (error: any) => void;
     onClose?: () => void;
   }) {
@@ -172,54 +171,6 @@ export class VoiceService {
             if (event.results[i].isFinal) {
               const text = event.results[i][0].transcript.trim();
               if (!text || !this.isConnected) continue;
-
-              // ── Detect voice commands ──────────────────────────────────
-              // Strip punctuation AND the Hebrew direct-object marker "את"
-              // so "תוריד לי את תיק הלקוח" → "תוריד לי תיק הלקוח"
-              const lower = text
-                .replace(/[.,!?'"]/g, "")
-                .replace(/\bאת\b/g, "")
-                .replace(/\s+/g, " ")
-                .trim();
-
-              // ── Strict command detection ───────────────────────────────
-              // Require "תיק לקוח / תיק הלקוח" as explicit subject,
-              // OR a clear download verb directly paired with a summary word.
-              // Intentionally narrow — common business words like "עדכן",
-              // "הכן", "סיכום", "תיק" appear constantly in strategy talk and
-              // must NOT be silently swallowed as commands.
-
-              const hasClientFileSubject =
-                lower.includes("תיק לקוח") || lower.includes("תיק הלקוח");
-
-              // Pure download/prepare verbs only (not שלח / עדכן / צור which
-              // are too common in normal conversation)
-              const hasDownloadVerb =
-                lower.includes("הורד") || lower.includes("תוריד") ||
-                lower.includes("להוריד") || lower.includes("הכן") ||
-                lower.includes("תכין");
-
-              // Summary word as standalone — does NOT match if it is only
-              // embedded inside a larger word
-              const hasSummaryWord =
-                /(?:^|[\s])סיכום(?:[\s]|$)/.test(lower) ||
-                lower.includes("לסכם");
-
-              // Trigger when: (1) any mention of "תיק לקוח/הלקוח" — subject
-              // is specific enough on its own, OR (2) explicit download verb
-              // AND a standalone summary word.
-              const isUpdateCommand =
-                hasClientFileSubject ||
-                (hasDownloadVerb && hasSummaryWord);
-
-              if (isUpdateCommand) {
-                // Fire the command so Chat.tsx can trigger the file download
-                callbacks.onVoiceCommand?.("updateClientFile");
-                // ↓ IMPORTANT: do NOT skip — still add to history/transcript
-                // so the conversation content is preserved for the summary.
-              }
-              // ─────────────────────────────────────────────────────────
-
               this.inputTranscriptBuffer = text;
               this.flushInputTranscript(callbacks);
             }
