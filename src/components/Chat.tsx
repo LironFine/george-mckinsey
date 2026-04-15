@@ -26,6 +26,8 @@ export default function Chat({ externalInput }: { externalInput?: string }) {
   const [isWaitingForName, setIsWaitingForName] = useState(false);
   const [isVoiceActive, setIsVoiceActive] = useState(false);
   const voiceStartTimeRef = useRef<number>(0);
+  // When true, the next voice transcription from the user is captured as the client name
+  const isWaitingForVoiceNameRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -437,10 +439,27 @@ ${voiceUserLines.join('\n')}
         history: messages,
         onVoiceCommand: (command) => {
           if (command === 'updateClientFile') {
-            handleUpdateClientFile();
+            if (clientName) {
+              // Name already known — run immediately
+              handleUpdateClientFile();
+            } else {
+              // Ask for name via voice, then proceed
+              isWaitingForVoiceNameRef.current = true;
+              voiceService.sendTextMessage(
+                "שאל את המשתמש: 'מה שמך?' — ואז תחכה לתשובה."
+              );
+            }
           }
         },
         onTranscription: (text, role) => {
+          // If we're waiting for the user to say their name via voice — capture it
+          if (role === 'user' && isWaitingForVoiceNameRef.current) {
+            isWaitingForVoiceNameRef.current = false;
+            setClientName(text);
+            handleUpdateClientFile(text);
+            return; // don't add to chat as a regular message
+          }
+
           const voiceMsg: Message = {
             id: `voice-${Date.now()}-${Math.random().toString(36).slice(2)}`,
             role: role === 'model' ? 'assistant' : 'user',

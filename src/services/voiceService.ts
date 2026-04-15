@@ -169,39 +169,30 @@ export class VoiceService {
               if (!text || !this.isConnected) continue;
 
               // ── Detect voice commands ──────────────────────────────────
-              const lower = text.replace(/[.,!?'"]/g, "").trim();
-              const isUpdateCommand =
-                // "עדכן/עדכון" variants
-                lower.includes("עדכן תיק") ||
-                lower.includes("תעדכן תיק") ||
-                lower.includes("עדכון תיק") ||
-                // "הכן/תכין" variants
-                lower.includes("הכן תיק") ||
-                lower.includes("תכין תיק") ||
-                lower.includes("הכן לי תיק") ||
-                lower.includes("תכין לי תיק") ||
-                // "הורד/תוריד" variants
-                lower.includes("הורד תיק") ||
-                lower.includes("תוריד תיק") ||
-                lower.includes("תוריד לי תיק") ||
-                lower.includes("להוריד תיק") ||
-                // "סיכום" variants
-                lower.includes("הכן סיכום") ||
-                lower.includes("תכין סיכום") ||
-                lower.includes("הכינו סיכום") ||
-                lower.includes("צור סיכום") ||
-                lower.includes("תצור סיכום") ||
-                lower.includes("הורד סיכום") ||
-                lower.includes("תוריד סיכום") ||
-                // "תיק לקוח" as direct command (short phrases only)
-                (lower === "תיק לקוח") ||
-                (lower === "עדכן תיק לקוח") ||
-                (lower === "תעדכן תיק לקוח") ||
-                (lower === "הכן תיק לקוח") ||
-                (lower === "תכין תיק לקוח") ||
-                (lower === "הורד תיק לקוח") ||
-                (lower === "תוריד תיק לקוח") ||
-                (lower === "תוריד לי תיק לקוח");
+              // Strip punctuation AND the Hebrew direct-object marker "את"
+              // so "תוריד לי את תיק הלקוח" → "תוריד לי תיק הלקוח"
+              const lower = text
+                .replace(/[.,!?'"]/g, "")
+                .replace(/\bאת\b/g, "")
+                .replace(/\s+/g, " ")
+                .trim();
+
+              const hasAction =
+                lower.includes("עדכן") || lower.includes("תעדכן") ||
+                lower.includes("עדכון") || lower.includes("הכן") ||
+                lower.includes("תכין") || lower.includes("הכינו") ||
+                lower.includes("הורד") || lower.includes("תוריד") ||
+                lower.includes("להוריד") || lower.includes("צור") ||
+                lower.includes("תצור") || lower.includes("שלח") ||
+                lower.includes("תשלח") || lower.includes("תעשה") ||
+                lower.includes("תעשי");
+
+              const hasSubject =
+                lower.includes("תיק לקוח") || lower.includes("תיק") ||
+                lower.includes("סיכום") || lower.includes("לסכם") ||
+                lower.includes("לסכום");
+
+              const isUpdateCommand = hasAction && hasSubject;
 
               if (isUpdateCommand) {
                 callbacks.onVoiceCommand?.("updateClientFile");
