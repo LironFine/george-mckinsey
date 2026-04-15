@@ -1,6 +1,7 @@
 export class VoiceService {
   private ws: WebSocket | null = null;
-  private audioContext: AudioContext | null = null;
+  private inputContext: AudioContext | null = null;  // 16kHz — mic capture
+  private audioContext: AudioContext | null = null;  // 24kHz — playback only
   private workletNode: AudioWorkletNode | null = null;
   private source: MediaStreamAudioSourceNode | null = null;
   private stream: MediaStream | null = null;
@@ -94,15 +95,22 @@ export class VoiceService {
 
       this.isConnected = true;
 
-      // Set up audio capture
+      // 24kHz context — playback only (matches Gemini's output format)
       this.audioContext = new (window.AudioContext ||
         (window as any).webkitAudioContext)({ sampleRate: 24000 });
-      this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      this.source = this.audioContext.createMediaStreamSource(this.stream);
 
-      await this.audioContext.audioWorklet.addModule("/audio-processor.js");
+      // 16kHz context — mic capture only (matches Gemini's expected input format)
+      // Using a separate context ensures the PCM we send is actually 16kHz,
+      // matching the mimeType "audio/pcm;rate=16000" we declare to Gemini.
+      this.inputContext = new (window.AudioContext ||
+        (window as any).webkitAudioContext)({ sampleRate: 16000 });
+
+      this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      this.source = this.inputContext.createMediaStreamSource(this.stream);
+
+      await this.inputContext.audioWorklet.addModule("/audio-processor.js");
       this.workletNode = new AudioWorkletNode(
-        this.audioContext,
+        this.inputContext,
         "microphone-processor"
       );
 
@@ -132,8 +140,8 @@ export class VoiceService {
         }
       };
 
+      // Connect mic → worklet (no need to connect to destination — capture only)
       this.source.connect(this.workletNode);
-      this.workletNode.connect(this.audioContext.destination);
 
       // Send greeting
       setTimeout(() => {
@@ -288,6 +296,10 @@ export class VoiceService {
     if (this.stream) {
       this.stream.getTracks().forEach((track) => track.stop());
       this.stream = null;
+    }
+    if (this.inputContext) {
+      this.inputContext.close();
+      this.inputContext = null;
     }
     if (this.audioContext) {
       this.audioContext.close();
