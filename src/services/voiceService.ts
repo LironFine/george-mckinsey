@@ -9,6 +9,8 @@ export class VoiceService {
   private isConnected: boolean = false;
   private activeSources: AudioBufferSourceNode[] = [];
   private history: { role: string; content: string }[] = [];
+  private inputTranscriptBuffer: string = "";   // accumulates user speech
+  private outputTranscriptBuffer: string = "";  // accumulates model speech
 
   constructor() {}
 
@@ -18,12 +20,14 @@ export class VoiceService {
 
   async start(callbacks: {
     history?: any[];
-    onTranscription?: (text: string, role: "user" | "model") => void;
+    onTranscription?: (text: string, role: "user" | "model") => void;  // voice → text
     onError?: (error: any) => void;
     onClose?: () => void;
   }) {
     if (this.isConnected) return;
     this.history = [];
+    this.inputTranscriptBuffer = "";
+    this.outputTranscriptBuffer = "";
 
     try {
       // Connect to our backend WebSocket proxy
@@ -193,24 +197,64 @@ export class VoiceService {
     message: any,
     callbacks: { onTranscription?: (text: string, role: "user" | "model") => void }
   ) {
-    // Handle text content
-    if (message.serverContent?.modelTurn?.parts?.[0]?.text) {
-      const text = message.serverContent.modelTurn.parts[0].text;
+    // ── Output (model) audio transcription ──────────────────────────────────
+    if (message.serverContent?.outputTranscription) {
+      const t = message.serverContent.outputTranscription;
+      if (t.text) this.outputTranscriptBuffer += t.text;
+      if (t.finished === true) {
+        this.flushOutputTranscript(callbacks);
+      }
+    }
+
+    // ── Input (user) speech transcription ───────────────────────────────────
+    if (message.serverContent?.inputTranscription) {
+      const t = message.serverContent.inputTranscription;
+      if (t.text) this.inputTranscriptBuffer += t.text;
+      if (t.finished === true) {
+        this.flushInputTranscript(callbacks);
+      }
+    }
+
+    // ── Turn complete — flush any buffered transcription ────────────────────
+    if (message.serverContent?.turnComplete) {
+      this.flushOutputTranscript(callbacks);
+    }
+
+    // ── Audio chunks to play ─────────────────────────────────────────────────
+    const parts = message.serverContent?.modelTurn?.parts || [];
+    for (const part of parts) {
+      if (part?.inlineData?.data) {
+        this.playAudioChunk(part.inlineData.data);
+      }
+    }
+
+    // ── Interruption — stop playback, discard partial transcript ────────────
+    if (message.serverContent?.interrupted) {
+      this.stopPlayback();
+      this.outputTranscriptBuffer = "";
+    }
+  }
+
+  private flushOutputTranscript(
+    callbacks: { onTranscription?: (text: string, role: "user" | "model") => void }
+  ) {
+    const text = this.outputTranscriptBuffer.trim();
+    if (text) {
       this.history.push({ role: "assistant", content: text });
       callbacks.onTranscription?.(text, "model");
     }
+    this.outputTranscriptBuffer = "";
+  }
 
-    // Handle audio content
-    const audioData =
-      message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
-    if (audioData) {
-      this.playAudioChunk(audioData);
+  private flushInputTranscript(
+    callbacks: { onTranscription?: (text: string, role: "user" | "model") => void }
+  ) {
+    const text = this.inputTranscriptBuffer.trim();
+    if (text) {
+      this.history.push({ role: "user", content: text });
+      callbacks.onTranscription?.(text, "user");
     }
-
-    // Handle interruptions
-    if (message.serverContent?.interrupted) {
-      this.stopPlayback();
-    }
+    this.inputTranscriptBuffer = "";
   }
 
   private playAudioChunk(base64Data: string) {
@@ -279,6 +323,8 @@ export class VoiceService {
 
   stop() {
     this.isConnected = false;
+    this.inputTranscriptBuffer = "";
+    this.outputTranscriptBuffer = "";
 
     try {
       this.ws?.close();

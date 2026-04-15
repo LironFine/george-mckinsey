@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Send, User, Bot, Loader2, Paperclip, Sparkles, FileText, LayoutList, Calendar, ExternalLink, RefreshCw, ClipboardList, Mic, MicOff, Volume2 } from 'lucide-react';
+import { Send, User, Bot, Loader2, Paperclip, Sparkles, FileText, LayoutList, Calendar, ExternalLink, RefreshCw, ClipboardList, Mic, MicOff, Volume2, Mic2 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Message } from '../types';
@@ -387,6 +387,18 @@ export default function Chat({ externalInput }: { externalInput?: string }) {
       setIsVoiceActive(true);
       await voiceService.start({
         history: messages,
+        // Save voice transcriptions into chat history so they appear in the UI
+        // and get included in client file summaries
+        onTranscription: (text, role) => {
+          const voiceMsg: Message = {
+            id: `voice-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            role: role === 'model' ? 'assistant' : 'user',
+            content: text,
+            timestamp: Date.now(),
+            isVoice: true,
+          };
+          setMessages((prev) => [...prev, voiceMsg]);
+        },
         onError: (err) => {
           console.error(err);
           setIsVoiceActive(false);
@@ -453,8 +465,35 @@ export default function Chat({ externalInput }: { externalInput?: string }) {
                 <div
                   className={`${message.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-assistant'} text-[13px] sm:text-sm flex-1`}
                 >
+                  {/* Voice indicator badge */}
+                  {message.isVoice && (
+                    <span className="inline-flex items-center gap-1 text-[10px] opacity-50 mb-1">
+                      <Mic2 size={10} />
+                      <span>קולי</span>
+                    </span>
+                  )}
                   <div className="markdown-body">
-                    <Markdown remarkPlugins={[remarkGfm]}>{message.content}</Markdown>
+                    <Markdown
+                      remarkPlugins={[remarkGfm]}
+                      components={message.role === 'assistant' ? {
+                        // Bold text in assistant messages becomes a clickable chip
+                        strong({ children }) {
+                          const text = String(children);
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => handleSend(text)}
+                              className="inline-block px-2.5 py-0.5 mx-0.5 my-0.5 bg-blue-50 hover:bg-blue-100 active:bg-blue-200 text-blue-700 border border-blue-200 rounded-full text-[0.88em] font-medium cursor-pointer transition-colors"
+                              title={`לחץ לשליחה: ${text}`}
+                            >
+                              {text}
+                            </button>
+                          );
+                        }
+                      } : undefined}
+                    >
+                      {message.content}
+                    </Markdown>
                   </div>
                 </div>
                 {message.role === 'assistant' && (

@@ -163,6 +163,8 @@ async function startServer() {
             thinking_config: {
               thinking_budget: 0,
             },
+            input_audio_transcription: {},   // transcribe user's speech → text
+            output_audio_transcription: {},  // transcribe model's audio → text
             speech_config: {
               voice_config: {
                 prebuilt_voice_config: { voice_name: "Charon" },

@@ -3,6 +3,7 @@ export interface Message {
   role: 'user' | 'assistant';
   content: string;
   timestamp: number;
+  isVoice?: boolean;  // true = message came from voice transcription
 }
 
 export interface BusinessContext {
