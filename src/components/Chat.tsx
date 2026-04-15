@@ -559,8 +559,27 @@ ${voiceUserLines.join('\n')}
     }
   };
 
+  // Detect if running inside an iframe (e.g. Wix embed)
+  const isInIframe = window.self !== window.top;
+
   return (
     <div className="flex flex-col h-full glass-panel rounded-3xl overflow-hidden">
+      {/* Iframe banner — shown only when embedded, guides user to open in new tab for voice */}
+      {isInIframe && (
+        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center justify-between gap-3 shrink-0">
+          <span className="text-xs text-amber-800">
+            🎙️ לשיחה קולית יש לפתוח בחלון נפרד
+          </span>
+          <a
+            href={window.location.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs font-medium px-3 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-full transition-colors shrink-0"
+          >
+            פתח בחלון מלא ↗
+          </a>
+        </div>
+      )}
       {/* Voice Status Overlay */}
       {isVoiceActive && (
         <div 
