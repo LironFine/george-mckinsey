@@ -169,19 +169,50 @@ export class VoiceService {
               if (!text || !this.isConnected) continue;
 
               // ── Detect voice commands ──────────────────────────────────
-              const lower = text.replace(/[.,!?]/g, "");
+              const lower = text.replace(/[.,!?'"]/g, "").trim();
               const isUpdateCommand =
+                // "עדכן/עדכון" variants
                 lower.includes("עדכן תיק") ||
                 lower.includes("תעדכן תיק") ||
                 lower.includes("עדכון תיק") ||
+                // "הכן/תכין" variants
+                lower.includes("הכן תיק") ||
+                lower.includes("תכין תיק") ||
+                lower.includes("הכן לי תיק") ||
+                lower.includes("תכין לי תיק") ||
+                // "הורד/תוריד" variants
+                lower.includes("הורד תיק") ||
+                lower.includes("תוריד תיק") ||
+                lower.includes("תוריד לי תיק") ||
+                lower.includes("להוריד תיק") ||
+                // "סיכום" variants
                 lower.includes("הכן סיכום") ||
                 lower.includes("תכין סיכום") ||
                 lower.includes("הכינו סיכום") ||
                 lower.includes("צור סיכום") ||
-                lower.includes("תצור סיכום");
+                lower.includes("תצור סיכום") ||
+                lower.includes("הורד סיכום") ||
+                lower.includes("תוריד סיכום") ||
+                // "תיק לקוח" as direct command (short phrases only)
+                (lower === "תיק לקוח") ||
+                (lower === "עדכן תיק לקוח") ||
+                (lower === "תעדכן תיק לקוח") ||
+                (lower === "הכן תיק לקוח") ||
+                (lower === "תכין תיק לקוח") ||
+                (lower === "הורד תיק לקוח") ||
+                (lower === "תוריד תיק לקוח") ||
+                (lower === "תוריד לי תיק לקוח");
 
               if (isUpdateCommand) {
                 callbacks.onVoiceCommand?.("updateClientFile");
+                // Tell Gemini to be silent — the UI handles this action
+                // (best-effort: may arrive before Gemini starts responding)
+                if (this.ws && this.isConnected) {
+                  this.ws.send(JSON.stringify({
+                    type: "text",
+                    payload: { text: "אמור רק: 'בסדר, מכין.' ואל תוסיף דבר נוסף." },
+                  }));
+                }
                 // Don't add to transcription — it's a command, not content
                 continue;
               }
