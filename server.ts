@@ -161,7 +161,7 @@ async function startServer() {
           generation_config: {
             response_modalities: ["AUDIO"],
             thinking_config: {
-              thinking_budget: 0,
+              thinking_budget: 1024,
             },
             speech_config: {
               voice_config: {
