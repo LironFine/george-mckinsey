@@ -131,7 +131,7 @@ async function startServer() {
 
     // Connect directly to Gemini Live WebSocket — no SDK, no compatibility issues
     const geminiUrl =
-      `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${apiKey}`;
+      `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${apiKey}`;
 
     const geminiWs = new WsClient(geminiUrl);
 
@@ -139,7 +139,7 @@ async function startServer() {
       console.log("Connected to Gemini Live WebSocket");
       const setup = {
         setup: {
-          model: "models/gemini-2.0-flash-exp",
+          model: "models/gemini-2.0-flash-live-001",
           generation_config: {
             response_modalities: ["AUDIO"],
             speech_config: {
