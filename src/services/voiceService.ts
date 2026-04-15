@@ -13,6 +13,7 @@ export class VoiceService {
   private outputTranscriptBuffer: string = "";  // accumulates model speech (Gemini TEXT modality)
   private recognition: any = null;             // Web Speech API instance
   private isBargingIn: boolean = false;        // true while user is interrupting — block incoming audio
+  private bargingInTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {}
 
@@ -130,7 +131,7 @@ export class VoiceService {
         // isBargingIn flag blocks new audio chunks until Gemini confirms the interruption.
         if (rms > 0.05 && !this.isBargingIn) {
           this.stopPlayback();
-          this.isBargingIn = true;
+          this.startBargingIn();
         }
 
         const pcmData = this.float32ToInt16(new Float32Array(channelData));
@@ -291,10 +292,15 @@ export class VoiceService {
       }
     }
 
+    // ── Turn complete — George finished speaking, ready for next exchange ───
+    if (message.serverContent?.turnComplete) {
+      this.stopBargingIn();
+    }
+
     // ── Interruption confirmed by Gemini — stop playback, allow new audio ───
     if (message.serverContent?.interrupted) {
       this.stopPlayback();
-      this.isBargingIn = false;  // Gemini acknowledged; resume accepting audio
+      this.stopBargingIn();
     }
   }
 
@@ -318,6 +324,25 @@ export class VoiceService {
       callbacks.onTranscription?.(text, "user");
     }
     this.inputTranscriptBuffer = "";
+  }
+
+  private startBargingIn() {
+    this.isBargingIn = true;
+    // Safety reset: if Gemini doesn't send interrupted/turnComplete within
+    // 1.5s (e.g. user spoke between George's turns), unblock automatically
+    if (this.bargingInTimer) clearTimeout(this.bargingInTimer);
+    this.bargingInTimer = setTimeout(() => {
+      this.isBargingIn = false;
+      this.bargingInTimer = null;
+    }, 1500);
+  }
+
+  private stopBargingIn() {
+    this.isBargingIn = false;
+    if (this.bargingInTimer) {
+      clearTimeout(this.bargingInTimer);
+      this.bargingInTimer = null;
+    }
   }
 
   private playAudioChunk(base64Data: string) {
@@ -390,7 +415,7 @@ export class VoiceService {
     this.isConnected = false;
     this.inputTranscriptBuffer = "";
     this.outputTranscriptBuffer = "";
-    this.isBargingIn = false;
+    this.stopBargingIn();
     try { this.recognition?.stop(); } catch {}
     this.recognition = null;
 
