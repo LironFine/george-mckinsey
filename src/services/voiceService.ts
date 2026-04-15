@@ -182,29 +182,41 @@ export class VoiceService {
                 .replace(/\s+/g, " ")
                 .trim();
 
-              const hasAction =
-                lower.includes("עדכן") || lower.includes("תעדכן") ||
-                lower.includes("עדכון") || lower.includes("הכן") ||
-                lower.includes("תכין") || lower.includes("הכינו") ||
+              // ── Strict command detection ───────────────────────────────
+              // Require "תיק לקוח / תיק הלקוח" as explicit subject,
+              // OR a clear download verb directly paired with a summary word.
+              // Intentionally narrow — common business words like "עדכן",
+              // "הכן", "סיכום", "תיק" appear constantly in strategy talk and
+              // must NOT be silently swallowed as commands.
+
+              const hasClientFileSubject =
+                lower.includes("תיק לקוח") || lower.includes("תיק הלקוח");
+
+              // Pure download/prepare verbs only (not שלח / עדכן / צור which
+              // are too common in normal conversation)
+              const hasDownloadVerb =
                 lower.includes("הורד") || lower.includes("תוריד") ||
-                lower.includes("להוריד") || lower.includes("צור") ||
-                lower.includes("תצור") || lower.includes("שלח") ||
-                lower.includes("תשלח") || lower.includes("תעשה") ||
-                lower.includes("תעשי");
+                lower.includes("להוריד") || lower.includes("הכן") ||
+                lower.includes("תכין");
 
-              const hasSubject =
-                lower.includes("תיק לקוח") || lower.includes("תיק") ||
-                lower.includes("סיכום") || lower.includes("לסכם") ||
-                lower.includes("לסכום");
+              // Summary word as standalone — does NOT match if it is only
+              // embedded inside a larger word
+              const hasSummaryWord =
+                /(?:^|[\s])סיכום(?:[\s]|$)/.test(lower) ||
+                lower.includes("לסכם");
 
-              const isUpdateCommand = hasAction && hasSubject;
+              // Trigger when: (1) any mention of "תיק לקוח/הלקוח" — subject
+              // is specific enough on its own, OR (2) explicit download verb
+              // AND a standalone summary word.
+              const isUpdateCommand =
+                hasClientFileSubject ||
+                (hasDownloadVerb && hasSummaryWord);
 
               if (isUpdateCommand) {
-                // Let Chat.tsx decide what to tell Gemini (depends on whether
-                // the client name is already known or needs to be asked)
+                // Fire the command so Chat.tsx can trigger the file download
                 callbacks.onVoiceCommand?.("updateClientFile");
-                // Don't add to transcription — it's a command, not content
-                continue;
+                // ↓ IMPORTANT: do NOT skip — still add to history/transcript
+                // so the conversation content is preserved for the summary.
               }
               // ─────────────────────────────────────────────────────────
 

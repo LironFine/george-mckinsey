@@ -29,6 +29,14 @@ export async function checkAndIncrementUsage(): Promise<{ allowed: boolean; rema
 
 // ── Voice usage — tracked in minutes, not sessions ──────────────────────────
 
+/**
+ * Call this when a Firebase user signs in so usage limits are tied to
+ * their Google account (survives browser-cache clears).
+ */
+export function setVisitorId(uid: string): void {
+  localStorage.setItem('george_visitor_id', uid);
+}
+
 function getVisitorId(): string {
   let visitorId = localStorage.getItem('george_visitor_id');
   if (!visitorId) {

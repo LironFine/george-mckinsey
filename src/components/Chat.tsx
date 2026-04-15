@@ -1,15 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { User as FirebaseUser } from 'firebase/auth';
 import { motion, AnimatePresence } from 'motion/react';
-import { Send, User, Bot, Loader2, Paperclip, Sparkles, FileText, LayoutList, Calendar, ExternalLink, RefreshCw, ClipboardList, Mic, MicOff, Volume2, Mic2 } from 'lucide-react';
+import { Send, User, Bot, Loader2, Paperclip, Sparkles, FileText, LayoutList, Calendar, ExternalLink, RefreshCw, ClipboardList, Mic, MicOff, Volume2, Mic2, Cloud } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Message } from '../types';
 import { sendMessageToGemini } from '../services/gemini';
 import { INITIAL_MESSAGE } from '../constants';
 import { voiceService } from '../services/voiceService';
-import { checkAndIncrementUsage, checkVoiceMinutesAvailable, recordVoiceUsage } from '../services/usageService';
+import { checkAndIncrementUsage, checkVoiceMinutesAvailable, recordVoiceUsage, setVisitorId } from '../services/usageService';
+import { saveSession, loadSession } from '../services/historyService';
 
-export default function Chat({ externalInput }: { externalInput?: string }) {
+export default function Chat({ externalInput, user }: { externalInput?: string; user?: FirebaseUser | null }) {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -28,10 +30,51 @@ export default function Chat({ externalInput }: { externalInput?: string }) {
   const voiceStartTimeRef = useRef<number>(0);
   // When true, the next voice transcription from the user is captured as the client name
   const isWaitingForVoiceNameRef = useRef(false);
-  // State-driven voice commands — avoids stale closure when calling handleUpdateClientFile
-  const [pendingVoiceCommand, setPendingVoiceCommand] = useState<'updateClientFile' | null>(null);
-  const [pendingVoiceName, setPendingVoiceName] = useState<string | null>(null);
+  // Always-fresh messages ref — updated synchronously every render so voice
+  // callbacks always read the latest messages, even before React re-renders
+  const messagesRef = useRef<Message[]>(messages);
+  // Stores a snapshot of voiceHistory taken at the moment the command fired,
+  // so the name-collection flow can use the same snapshot
+  const pendingVoiceHistoryRef = useRef<{ role: string; content: string }[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // Debounce timer for Firestore auto-save
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Track whether we've already loaded history for the current user (avoid double-load)
+  const loadedUidRef = useRef<string | null>(null);
+
+  // ── Load history when user signs in ────────────────────────────────────────
+  useEffect(() => {
+    if (!user) { loadedUidRef.current = null; return; }
+    if (loadedUidRef.current === user.uid) return; // already loaded this session
+    loadedUidRef.current = user.uid;
+
+    // Tie usage limits to the Google account
+    setVisitorId(user.uid);
+
+    loadSession(user.uid).then((session) => {
+      if (session && session.messages.length > 1) {
+        setMessages(session.messages);
+        if (session.clientName) setClientName(session.clientName);
+      } else if (user.displayName && !clientName) {
+        // Pre-fill client name from Google profile on first use
+        setClientName(user.displayName);
+      }
+    });
+  }, [user?.uid]); // eslint-disable-line
+
+  // ── Auto-save to Firestore whenever messages change (2 s debounce) ─────────
+  useEffect(() => {
+    if (!user || messages.length <= 1) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      saveSession(user.uid, messages, clientName);
+      saveTimerRef.current = null;
+    }, 2000);
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, [messages, user?.uid, clientName]); // eslint-disable-line
+  // ───────────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
     if (externalInput) {
@@ -46,31 +89,6 @@ export default function Chat({ externalInput }: { externalInput?: string }) {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
-
-  // Voice command: updateClientFile — runs with fresh state (avoids stale closure)
-  useEffect(() => {
-    if (!pendingVoiceCommand) return;
-    setPendingVoiceCommand(null);
-
-    if (pendingVoiceCommand === 'updateClientFile') {
-      if (clientName) {
-        voiceService.sendTextMessage("אמור: 'בסדר, מכין.' ולא יותר.");
-        handleUpdateClientFile();
-      } else {
-        isWaitingForVoiceNameRef.current = true;
-        voiceService.sendTextMessage("שאל את המשתמש: 'מה שמך?' ותחכה בשקט לתשובה.");
-      }
-    }
-  }, [pendingVoiceCommand]);  // eslint-disable-line
-
-  // Voice name captured — run the file update with fresh state
-  useEffect(() => {
-    if (pendingVoiceName === null) return;
-    const name = pendingVoiceName;
-    setPendingVoiceName(null);
-    setClientName(name);
-    handleUpdateClientFile(name);
-  }, [pendingVoiceName]);  // eslint-disable-line
 
   const handleSend = async (contentOverride?: string) => {
     const messageContent = contentOverride || input;
@@ -208,11 +226,18 @@ export default function Chat({ externalInput }: { externalInput?: string }) {
     reader.readAsText(file);
   };
 
-  const handleUpdateClientFile = async (providedName?: string, messagesOverride?: Message[]) => {
-    // Allow update if there are messages OR if voice session was active (even if no text messages yet)
-    const currentMessages = messagesOverride || messages;
+  const handleUpdateClientFile = async (
+    providedName?: string,
+    messagesOverride?: Message[],
+    voiceHistoryOverride?: { role: string; content: string }[]
+  ) => {
+    // Use messagesRef.current (not the closure-captured `messages`) so we always
+    // get the latest messages even when called from a stale voice callback.
+    const currentMessages = messagesOverride || messagesRef.current;
     const hasHistory = currentMessages.length > 1;
-    const voiceHistory = voiceService.getHistory();
+    // Use the snapshot taken at command-fire time when available; otherwise
+    // read live (for button-click path)
+    const voiceHistory = voiceHistoryOverride ?? voiceService.getHistory();
     const hasVoiceHistory = voiceHistory.length > 0;
 
     if (isLoading) return;
@@ -322,12 +347,18 @@ ${voiceUserLines.join('\n')}
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
 
+      // Also persist to Firestore if the user is signed in
+      if (user) {
+        await saveSession(user.uid, messagesRef.current, finalName);
+      }
+
+      const cloudNote = user ? ' הוא גם נשמר אוטומטית בענן.' : '';
       const assistantMessage: Message = {
         id: Date.now().toString(),
         role: 'assistant',
-        content: hasHistory || hasVoiceHistory 
-          ? `הכנתי את העדכון לתיק הלקוח של ${finalName} (כולל סיכום של השיחה הקולית). המסמך ירד כעת למחשבך.`
-          : `יצרתי עבורך מסמך בסיס לתיק הלקוח של ${finalName}. תוכל להשתמש בו לתיעוד בהמשך.`,
+        content: hasHistory || hasVoiceHistory
+          ? `הכנתי את העדכון לתיק הלקוח של ${finalName} (כולל סיכום של השיחה הקולית). המסמך ירד כעת למחשבך.${cloudNote}`
+          : `יצרתי עבורך מסמך בסיס לתיק הלקוח של ${finalName}. תוכל להשתמש בו לתיעוד בהמשך.${cloudNote}`,
         timestamp: Date.now(),
       };
       setMessages((prev) => [...prev, assistantMessage]);
@@ -345,6 +376,15 @@ ${voiceUserLines.join('\n')}
       setIsLoading(false);
     }
   };
+
+  // ── Always-fresh refs — updated on every render so voice callbacks
+  // never hold a stale closure over state or handler functions ─────────────
+  messagesRef.current = messages;                                    // ← keep in sync with every render
+  const handleUpdateClientFileRef = useRef<typeof handleUpdateClientFile>(handleUpdateClientFile);
+  handleUpdateClientFileRef.current = handleUpdateClientFile;
+  const clientNameRef = useRef(clientName);
+  clientNameRef.current = clientName;
+  // ─────────────────────────────────────────────────────────────────────────
 
   const handleDownloadBrief = async () => {
     if (messages.length <= 1 || isLoading) return;
@@ -409,6 +449,12 @@ ${voiceUserLines.join('\n')}
     setClientFileName('');
     setClientName('');
     setIsWaitingForName(false);
+    // Allow a fresh load if user wants to return to their cloud history later
+    loadedUidRef.current = null;
+    // If signed in, immediately overwrite cloud with the empty/fresh session
+    if (user) saveSession(user.uid, [{
+      id: '1', role: 'assistant', content: INITIAL_MESSAGE, timestamp: Date.now()
+    }], '');
   };
 
   const toggleVoice = async () => {
@@ -467,16 +513,36 @@ ${voiceUserLines.join('\n')}
         history: messages,
         onVoiceCommand: (command) => {
           if (command === 'updateClientFile') {
-            // Use state instead of calling directly — avoids stale closure.
-            // The useEffect above fires after the next render with fresh state.
-            setPendingVoiceCommand('updateClientFile');
+            // Snapshot both data sources NOW, before any echo feedback
+            // (George's "בסדר, מכין" through the mic) can pollute them
+            const voiceSnap = [...voiceService.getHistory()];
+            const msgsSnap  = messagesRef.current;
+
+            if (clientNameRef.current) {
+              // Name already known — George's system prompt says "בסדר, מכין"
+              // automatically; we just trigger the actual file generation
+              handleUpdateClientFileRef.current(undefined, msgsSnap, voiceSnap);
+            } else {
+              // Name unknown — ask George to ask the user for their name;
+              // stash the snapshot so it can be used when the name arrives
+              isWaitingForVoiceNameRef.current = true;
+              pendingVoiceHistoryRef.current = voiceSnap;
+              voiceService.sendTextMessage(
+                "המשתמש ביקש להכין תיק לקוח אבל אנחנו לא יודעים את שמו. " +
+                "אמור: 'בסדר. מה שמך?' ותחכה לתשובה."
+              );
+            }
           }
         },
         onTranscription: (text, role) => {
           // Waiting for user to say their name via voice
           if (role === 'user' && isWaitingForVoiceNameRef.current) {
             isWaitingForVoiceNameRef.current = false;
-            setPendingVoiceName(text); // triggers useEffect above with fresh state
+            setClientName(text);
+            const snap = pendingVoiceHistoryRef.current;
+            pendingVoiceHistoryRef.current = [];
+            // Small delay so setClientName propagates before handleUpdateClientFile reads it
+            setTimeout(() => handleUpdateClientFileRef.current(text, messagesRef.current, snap), 100);
             return;
           }
 
@@ -504,6 +570,8 @@ ${voiceUserLines.join('\n')}
         onClose: () => {
           recordVoiceUsage(voiceStartTimeRef.current);
           setIsVoiceActive(false);
+          // Immediate cloud-save when voice ends (bypass the 2 s debounce)
+          if (user) saveSession(user.uid, messagesRef.current, clientNameRef.current);
         },
       });
     }
@@ -680,8 +748,8 @@ ${voiceUserLines.join('\n')}
             className="flex items-center justify-center gap-1.5 px-2 py-1.5 sm:px-4 sm:py-2 bg-slate-50 text-slate-700 rounded-full text-[9px] sm:text-[11px] font-medium hover:bg-slate-100 transition-colors border border-slate-200"
             aria-label="עדכון תיק לקוח"
           >
-            <LayoutList size={12} className="sm:w-[14px] sm:h-[14px]" />
-            <span className="truncate">עדכון תיק לקוח</span>
+            {user ? <Cloud size={12} className="sm:w-[14px] sm:h-[14px]" /> : <LayoutList size={12} className="sm:w-[14px] sm:h-[14px]" />}
+            <span className="truncate">{user ? 'שמור + הורד' : 'עדכון תיק לקוח'}</span>
           </button>
           <button
             onClick={() => handleDownloadBrief()}

@@ -1,7 +1,10 @@
-import React, { useState, Component, ErrorInfo, ReactNode } from 'react';
+import React, { useState, useEffect, Component, ErrorInfo, ReactNode } from 'react';
+import { onAuthStateChanged, User } from 'firebase/auth';
+import { auth } from './lib/firebase';
 import Chat from './components/Chat';
 import Sidebar from './components/Sidebar';
-import { Briefcase, Menu, X, AlertTriangle } from 'lucide-react';
+import AuthButton from './components/AuthButton';
+import { Briefcase, X, AlertTriangle } from 'lucide-react';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -67,6 +70,12 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
 export default function App() {
   const [externalInput, setExternalInput] = React.useState<string | undefined>(undefined);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, setUser);
+    return unsub;
+  }, []);
 
   const handleSelectModel = (modelName: string) => {
     setExternalInput(`אשמח להתייעץ איתך בנושא מודל ${modelName}`);
@@ -90,15 +99,18 @@ export default function App() {
             </div>
           </div>
           
-          <button 
-            onClick={() => setIsMobileMenuOpen(true)}
-            className="lg:hidden flex flex-col items-center gap-0.5 group"
-          >
+          <div className="flex items-center gap-2">
+            <AuthButton user={user} />
+            <button
+              onClick={() => setIsMobileMenuOpen(true)}
+              className="lg:hidden flex flex-col items-center gap-0.5 group"
+            >
             <div className="w-10 h-10 bg-red-500 rounded-xl flex items-center justify-center text-white shadow-md shadow-red-100 group-hover:bg-red-600 transition-all">
               <Briefcase size={20} />
             </div>
             <span className="text-[9px] font-bold text-red-600 uppercase tracking-tighter">כלים</span>
           </button>
+          </div>
         </header>
 
         {/* Mobile Sidebar Overlay */}
@@ -123,7 +135,7 @@ export default function App() {
         {/* Main Content */}
         <main className="flex-1 flex max-w-7xl mx-auto w-full p-2 lg:p-4 gap-6 relative overflow-hidden items-stretch">
           <div className="flex-1 min-w-0 h-full overflow-hidden">
-            <Chat externalInput={externalInput} />
+            <Chat externalInput={externalInput} user={user} />
           </div>
           <div className="hidden lg:block h-full shrink-0">
             <Sidebar onSelectModel={handleSelectModel} />

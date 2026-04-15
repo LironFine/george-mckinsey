@@ -1,3 +1,16 @@
-// Firebase removed — usage tracking uses localStorage only.
-export const db = null;
-export const auth = null;
+import { initializeApp } from 'firebase/app';
+import { getAuth } from 'firebase/auth';
+import { getFirestore } from 'firebase/firestore';
+
+const firebaseConfig = {
+  projectId: "gen-lang-client-0766618683",
+  appId: "1:478311515884:web:103fb4b7a3df9230d787c9",
+  apiKey: "AIzaSyCGCQCTDNKI3SEBrwlmUUQeQfuLvM0mjJM",
+  authDomain: "gen-lang-client-0766618683.firebaseapp.com",
+  storageBucket: "gen-lang-client-0766618683.firebasestorage.app",
+  messagingSenderId: "478311515884",
+};
+
+export const app  = initializeApp(firebaseConfig);
+export const auth = getAuth(app);
+export const db   = getFirestore(app); // uses the default Firestore database
