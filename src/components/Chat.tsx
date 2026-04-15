@@ -50,9 +50,10 @@ export default function Chat({ externalInput, user }: { externalInput?: string; 
       if (session && session.messages.length > 1) {
         setMessages(session.messages);
         if (session.clientName) setClientName(session.clientName);
-      } else if (user.displayName && !clientName) {
+        console.log('[Chat] history restored from Firestore');
+      } else {
         // Pre-fill client name from Google profile on first use
-        setClientName(user.displayName);
+        if (user.displayName) setClientName(user.displayName);
       }
     });
   }, [user?.uid]); // eslint-disable-line
@@ -61,9 +62,21 @@ export default function Chat({ externalInput, user }: { externalInput?: string; 
   useEffect(() => {
     if (!user || messages.length <= 1) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
-      saveSession(user.uid, messages, clientName);
+    saveTimerRef.current = setTimeout(async () => {
+      const ok = await saveSession(user.uid, messages, clientName);
       saveTimerRef.current = null;
+      if (!ok) {
+        // Show a visible warning so the user knows cloud save isn't working
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `fs-err-${Date.now()}`,
+            role: 'assistant' as const,
+            content: '⚠️ לא הצלחתי לשמור את השיחה בענן. אנא בדוק בקונסול הדפדפן (F12) מה השגיאה ופנה לתמיכה.',
+            timestamp: Date.now(),
+          },
+        ]);
+      }
     }, 2000);
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);

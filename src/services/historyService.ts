@@ -7,17 +7,16 @@ const MAX_STORED_MESSAGES = 300;
 
 /**
  * Save the current conversation to Firestore under users/{uid}.
- * Silently swallows errors so UI is never blocked by a failed save.
+ * Returns true on success, false on failure.
  */
 export async function saveSession(
   uid: string,
   messages: Message[],
   clientName: string
-): Promise<void> {
-  if (!db || !uid) return;
+): Promise<boolean> {
+  if (!db || !uid) return false;
   try {
     const ref = doc(db, 'users', uid);
-    // Trim to the most-recent messages if the conversation is very long
     const trimmed = messages.slice(-MAX_STORED_MESSAGES);
     await setDoc(
       ref,
@@ -37,8 +36,11 @@ export async function saveSession(
       },
       { merge: true }
     );
-  } catch (err) {
-    console.warn('historyService: save failed', err);
+    console.log(`[Firestore] session saved — ${trimmed.length} messages`);
+    return true;
+  } catch (err: any) {
+    console.error('[Firestore] saveSession FAILED:', err?.code, err?.message);
+    return false;
   }
 }
 
@@ -53,15 +55,19 @@ export async function loadSession(
   try {
     const ref  = doc(db, 'users', uid);
     const snap = await getDoc(ref);
-    if (!snap.exists()) return null;
+    if (!snap.exists()) {
+      console.log('[Firestore] no prior session found for user');
+      return null;
+    }
     const session = snap.data()?.lastSession;
     if (!session || !Array.isArray(session.messages)) return null;
+    console.log(`[Firestore] session loaded — ${session.messages.length} messages`);
     return {
       messages:   session.messages as Message[],
       clientName: session.clientName ?? '',
     };
-  } catch (err) {
-    console.warn('historyService: load failed', err);
+  } catch (err: any) {
+    console.error('[Firestore] loadSession FAILED:', err?.code, err?.message);
     return null;
   }
 }
