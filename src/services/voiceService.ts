@@ -9,8 +9,9 @@ export class VoiceService {
   private isConnected: boolean = false;
   private activeSources: AudioBufferSourceNode[] = [];
   private history: { role: string; content: string }[] = [];
-  private inputTranscriptBuffer: string = "";   // accumulates user speech
-  private outputTranscriptBuffer: string = "";  // accumulates model speech
+  private inputTranscriptBuffer: string = "";   // accumulates user speech (Web Speech API)
+  private outputTranscriptBuffer: string = "";  // accumulates model speech (Gemini TEXT modality)
+  private recognition: any = null;             // Web Speech API instance
 
   constructor() {}
 
@@ -147,6 +148,49 @@ export class VoiceService {
       // Connect mic → worklet (no need to connect to destination — capture only)
       this.source.connect(this.workletNode);
 
+      // ── Web Speech API for user speech transcription ─────────────────────
+      // Runs in parallel with audio streaming; Chrome transcribes what the
+      // user says and we save it to history / surface in the chat UI.
+      const SpeechRecognition =
+        (window as any).SpeechRecognition ||
+        (window as any).webkitSpeechRecognition;
+
+      if (SpeechRecognition) {
+        this.recognition = new SpeechRecognition();
+        this.recognition.lang = "he-IL";
+        this.recognition.continuous = true;
+        this.recognition.interimResults = false;
+
+        this.recognition.onresult = (event: any) => {
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            if (event.results[i].isFinal) {
+              const text = event.results[i][0].transcript.trim();
+              if (text && this.isConnected) {
+                this.inputTranscriptBuffer = text;
+                this.flushInputTranscript(callbacks);
+              }
+            }
+          }
+        };
+
+        // Auto-restart recognition if it stops (happens periodically in Chrome)
+        this.recognition.onend = () => {
+          if (this.isConnected) {
+            try { this.recognition?.start(); } catch {}
+          }
+        };
+
+        this.recognition.onerror = (e: any) => {
+          // "aborted" = we stopped it ourselves; "no-speech" = normal silence
+          if (e.error !== "aborted" && e.error !== "no-speech" && this.isConnected) {
+            try { this.recognition?.start(); } catch {}
+          }
+        };
+
+        try { this.recognition.start(); } catch {}
+      }
+      // ─────────────────────────────────────────────────────────────────────
+
       // Send greeting
       setTimeout(() => {
         if (this.isConnected && this.ws) {
@@ -197,38 +241,25 @@ export class VoiceService {
     message: any,
     callbacks: { onTranscription?: (text: string, role: "user" | "model") => void }
   ) {
-    // ── Output (model) audio transcription ──────────────────────────────────
-    if (message.serverContent?.outputTranscription) {
-      const t = message.serverContent.outputTranscription;
-      if (t.text) this.outputTranscriptBuffer += t.text;
-      if (t.finished === true) {
-        this.flushOutputTranscript(callbacks);
+    // ── Model turn: collect audio + TEXT modality transcription ────────────
+    const parts = message.serverContent?.modelTurn?.parts || [];
+    for (const part of parts) {
+      if (part?.inlineData?.data) {
+        // Audio chunk → play it
+        this.playAudioChunk(part.inlineData.data);
+      }
+      if (part?.text) {
+        // TEXT modality — accumulate for transcription
+        this.outputTranscriptBuffer += part.text;
       }
     }
 
-    // ── Input (user) speech transcription ───────────────────────────────────
-    if (message.serverContent?.inputTranscription) {
-      const t = message.serverContent.inputTranscription;
-      if (t.text) this.inputTranscriptBuffer += t.text;
-      if (t.finished === true) {
-        this.flushInputTranscript(callbacks);
-      }
-    }
-
-    // ── Turn complete — flush any buffered transcription ────────────────────
+    // ── Turn complete — flush buffered model transcription ─────────────────
     if (message.serverContent?.turnComplete) {
       this.flushOutputTranscript(callbacks);
     }
 
-    // ── Audio chunks to play ─────────────────────────────────────────────────
-    const parts = message.serverContent?.modelTurn?.parts || [];
-    for (const part of parts) {
-      if (part?.inlineData?.data) {
-        this.playAudioChunk(part.inlineData.data);
-      }
-    }
-
-    // ── Interruption — stop playback, discard partial transcript ────────────
+    // ── Interruption — stop playback, discard partial transcript ───────────
     if (message.serverContent?.interrupted) {
       this.stopPlayback();
       this.outputTranscriptBuffer = "";
@@ -325,6 +356,8 @@ export class VoiceService {
     this.isConnected = false;
     this.inputTranscriptBuffer = "";
     this.outputTranscriptBuffer = "";
+    try { this.recognition?.stop(); } catch {}
+    this.recognition = null;
 
     try {
       this.ws?.close();

@@ -159,12 +159,10 @@ async function startServer() {
         setup: {
           model: "models/gemini-2.5-flash-native-audio-latest",
           generation_config: {
-            response_modalities: ["AUDIO"],
+            response_modalities: ["AUDIO", "TEXT"],  // TEXT gives us model transcription
             thinking_config: {
               thinking_budget: 0,
             },
-            input_audio_transcription: {},   // transcribe user's speech → text
-            output_audio_transcription: {},  // transcribe model's audio → text
             speech_config: {
               voice_config: {
                 prebuilt_voice_config: { voice_name: "Charon" },
