@@ -7,7 +7,7 @@ import { Message } from '../types';
 import { sendMessageToGemini } from '../services/gemini';
 import { INITIAL_MESSAGE } from '../constants';
 import { voiceService } from '../services/voiceService';
-import { checkAndIncrementUsage, checkAndIncrementVoiceUsage } from '../services/usageService';
+import { checkAndIncrementUsage, checkVoiceMinutesAvailable, recordVoiceUsage } from '../services/usageService';
 
 export default function Chat({ externalInput }: { externalInput?: string }) {
   const [messages, setMessages] = useState<Message[]>([
@@ -25,6 +25,7 @@ export default function Chat({ externalInput }: { externalInput?: string }) {
   const [clientName, setClientName] = useState<string>('');
   const [isWaitingForName, setIsWaitingForName] = useState(false);
   const [isVoiceActive, setIsVoiceActive] = useState(false);
+  const voiceStartTimeRef = useRef<number>(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -383,9 +384,11 @@ ${voiceUserLines.join('\n')}
   const toggleVoice = async () => {
     if (isVoiceActive) {
       voiceService.stop();
+      // Record actual minutes used in this session
+      recordVoiceUsage(voiceStartTimeRef.current);
       setIsVoiceActive(false);
     } else {
-      // Check browser WebSocket support (all modern browsers support it, but just in case)
+      // Check browser support
       if (!window.WebSocket) {
         setMessages((prev) => [
           ...prev,
@@ -399,26 +402,39 @@ ${voiceUserLines.join('\n')}
         return;
       }
 
-      // Check monthly voice usage limit before starting
-      const { allowed, resetDays } = await checkAndIncrementVoiceUsage();
+      // Check monthly voice minutes limit (90 min ≈ 8 ₪)
+      const { allowed, remainingMinutes, resetDays } = await checkVoiceMinutesAvailable();
       if (!allowed) {
         setMessages((prev) => [
           ...prev,
           {
             id: Date.now().toString(),
             role: 'assistant',
-            content: `הגעת למכסת השיחות הקוליות החודשית שלך (30 שיחות). המכסה תתחדש בעוד ${resetDays} ימים. ניתן להמשיך בצ'אט הטקסטואלי ללא הגבלה.`,
+            content: `נגמרו לך דקות השיחה הקולית החודשיות (90 דקות). המכסה תתחדש בעוד ${resetDays} ימים. ניתן להמשיך בצ'אט הטקסטואלי ללא הגבלה.`,
             timestamp: Date.now(),
           } as Message,
         ]);
         return;
       }
 
+      // Warn if fewer than 10 minutes remain
+      if (remainingMinutes <= 10) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `voice-warn-${Date.now()}`,
+            role: 'assistant',
+            content: `שים לב: נותרו לך כ-${remainingMinutes} דקות שיחה קולית החודש.`,
+            timestamp: Date.now(),
+          } as Message,
+        ]);
+      }
+
+      voiceStartTimeRef.current = Date.now();
       setIsVoiceActive(true);
+
       await voiceService.start({
         history: messages,
-        // Save voice transcriptions into chat history so they appear in the UI
-        // and get included in client file summaries
         onVoiceCommand: (command) => {
           if (command === 'updateClientFile') {
             handleUpdateClientFile();
@@ -436,6 +452,7 @@ ${voiceUserLines.join('\n')}
         },
         onError: (err) => {
           console.error(err);
+          recordVoiceUsage(voiceStartTimeRef.current);
           setIsVoiceActive(false);
           const errMsg: Message = {
             id: Date.now().toString(),
@@ -446,6 +463,7 @@ ${voiceUserLines.join('\n')}
           setMessages((prev) => [...prev, errMsg]);
         },
         onClose: () => {
+          recordVoiceUsage(voiceStartTimeRef.current);
           setIsVoiceActive(false);
         },
       });
