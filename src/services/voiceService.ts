@@ -195,9 +195,41 @@ export class VoiceService {
       }
       // ─────────────────────────────────────────────────────────────────────
 
-      // Send immediate greeting — fire as soon as session is ready
+      // Send history (if any) + greeting as a single combined turn.
+      // History MUST arrive before the greeting so the model has full context
+      // before it opens its mouth. Previously history was sent at 1200ms AFTER
+      // the greeting at 200ms — the model would start fresh every voice session.
       setTimeout(() => {
-        if (this.isConnected && this.ws) {
+        if (!this.isConnected || !this.ws) return;
+
+        const history = callbacks.history || [];
+
+        if (history.length > 0) {
+          // Build compact history string; keep the MOST RECENT messages if truncating
+          let historyText = history
+            .map(
+              (m: any) =>
+                `${m.role === "assistant" ? "ג'ורג' מקינזי" : "משתמש"}: ${m.content}`
+            )
+            .join("\n");
+          if (historyText.length > 10000) {
+            historyText =
+              "... (היסטוריה מקוצרת)\n" +
+              historyText.substring(historyText.length - 10000);
+          }
+
+          // One combined instruction: absorb context → greet → listen
+          this.ws.send(
+            JSON.stringify({
+              type: "text",
+              payload: {
+                text:
+                  `להלן היסטוריית השיחה הטקסטואלית עד כה. קרא אותה, זכור את כל ההקשר, ואז אמור בדיוק ורק: "אני כאן, אפשר לדבר איתי." ואז השתתק ותקשיב.\n\n${historyText}`,
+              },
+            })
+          );
+        } else {
+          // No prior history — plain greeting only
           this.ws.send(
             JSON.stringify({
               type: "text",
@@ -207,34 +239,7 @@ export class VoiceService {
             })
           );
         }
-      }, 200);
-
-      // Send prior chat history as context
-      const history = callbacks.history || [];
-      if (history.length > 0) {
-        setTimeout(() => {
-          if (!this.isConnected || !this.ws) return;
-          let historyText = history
-            .map(
-              (m: any) =>
-                `${m.role === "assistant" ? "ג'ורג' מקינזי" : "משתמש"}: ${m.content}`
-            )
-            .join("\n");
-          if (historyText.length > 10000) {
-            historyText =
-              historyText.substring(historyText.length - 10000) +
-              "... (היסטוריה מקוצרת)";
-          }
-          this.ws!.send(
-            JSON.stringify({
-              type: "text",
-              payload: {
-                text: `להלן היסטוריית השיחה עד כה. אנא המשך מהנקודה הזו:\n${historyText}`,
-              },
-            })
-          );
-        }, 1200);
-      }
+      }, 300);
     } catch (err) {
       console.error("Failed to start voice session:", err);
       callbacks.onError?.(err);

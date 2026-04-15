@@ -27,6 +27,7 @@ export default function Chat({ externalInput, user }: { externalInput?: string; 
   const [clientName, setClientName] = useState<string>('');
   const [isWaitingForName, setIsWaitingForName] = useState(false);
   const [isVoiceActive, setIsVoiceActive] = useState(false);
+  const [cloudStatus, setCloudStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const voiceStartTimeRef = useRef<number>(0);
   // Always-fresh messages ref — updated synchronously every render so voice
   // callbacks (onClose) always read the latest messages, even before React re-renders
@@ -36,6 +37,8 @@ export default function Chat({ externalInput, user }: { externalInput?: string; 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Track whether we've already loaded history for the current user (avoid double-load)
   const loadedUidRef = useRef<string | null>(null);
+  // Prevent re-triggering auto-save when an error state is set
+  const saveErrorShownRef = useRef(false);
 
   // ── Load history when user signs in ────────────────────────────────────────
   useEffect(() => {
@@ -61,27 +64,34 @@ export default function Chat({ externalInput, user }: { externalInput?: string; 
   // ── Auto-save to Firestore whenever messages change (2 s debounce) ─────────
   useEffect(() => {
     if (!user || messages.length <= 1) return;
+    // Don't re-trigger the save cycle if there's already a known error
+    if (saveErrorShownRef.current) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    setCloudStatus('saving');
     saveTimerRef.current = setTimeout(async () => {
       const ok = await saveSession(user.uid, messages, clientName);
       saveTimerRef.current = null;
-      if (!ok) {
-        // Show a visible warning so the user knows cloud save isn't working
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `fs-err-${Date.now()}`,
-            role: 'assistant' as const,
-            content: '⚠️ לא הצלחתי לשמור את השיחה בענן. אנא בדוק בקונסול הדפדפן (F12) מה השגיאה ופנה לתמיכה.',
-            timestamp: Date.now(),
-          },
-        ]);
+      if (ok) {
+        setCloudStatus('saved');
+        // Reset to idle after 3 s so the indicator fades out
+        setTimeout(() => setCloudStatus('idle'), 3000);
+      } else {
+        // Mark error once — don't add a chat message (that would re-trigger this effect)
+        setCloudStatus('error');
+        saveErrorShownRef.current = true;
+        console.error('[Chat] Firestore auto-save failed — check Firebase console / rules');
       }
     }, 2000);
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
   }, [messages, user?.uid, clientName]); // eslint-disable-line
+
+  // Reset the error flag when the user signs in/out so a fresh session can retry
+  useEffect(() => {
+    saveErrorShownRef.current = false;
+    setCloudStatus('idle');
+  }, [user?.uid]);
   // ───────────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -751,9 +761,21 @@ ${voiceUserLines.join('\n')}
           </a>
         </div>
 
-        <div className="text-center mt-3 text-[10px] text-slate-400 flex items-center justify-center gap-1">
+        <div className="text-center mt-3 text-[10px] text-slate-400 flex items-center justify-center gap-2">
           <Sparkles size={10} />
           <span>מופעל על ידי בינה מלאכותית אסטרטגית</span>
+          {user && cloudStatus !== 'idle' && (
+            <span className={`flex items-center gap-1 transition-all ${
+              cloudStatus === 'saving' ? 'text-slate-400' :
+              cloudStatus === 'saved'  ? 'text-green-500' :
+              'text-red-500'
+            }`}>
+              <Cloud size={10} className={cloudStatus === 'saving' ? 'animate-pulse' : ''} />
+              {cloudStatus === 'saving' && 'שומר...'}
+              {cloudStatus === 'saved'  && 'נשמר ✓'}
+              {cloudStatus === 'error'  && 'שגיאת שמירה — בדוק F12'}
+            </span>
+          )}
         </div>
       </div>
     </div>
