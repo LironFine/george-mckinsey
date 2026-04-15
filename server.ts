@@ -30,6 +30,24 @@ async function startServer() {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
 
+  // Diagnostic: list models that support Live API (bidiGenerateContent)
+  app.get("/api/live-models", async (req, res) => {
+    const apiKey = getApiKey();
+    if (!apiKey) return res.status(500).json({ error: "No API key" });
+    try {
+      const r = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}&pageSize=100`
+      );
+      const data = await r.json();
+      const liveModels = (data.models || [])
+        .filter((m: any) => m.supportedGenerationMethods?.includes("bidiGenerateContent"))
+        .map((m: any) => m.name);
+      res.json({ liveModels, total: liveModels.length });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // API endpoint for text chat — uses direct REST fetch, no SDK
   app.post("/api/chat", async (req, res) => {
     console.log(`Chat request received: ${JSON.stringify(req.body).substring(0, 100)}...`);
