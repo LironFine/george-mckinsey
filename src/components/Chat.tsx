@@ -387,15 +387,6 @@ export default function Chat({ externalInput }: { externalInput?: string }) {
       setIsVoiceActive(true);
       await voiceService.start({
         history: messages,
-        onTranscription: (text, role) => {
-          const msg: Message = {
-            id: Date.now().toString() + Math.random(),
-            role: role === 'model' ? 'assistant' : 'user',
-            content: text,
-            timestamp: Date.now(),
-          };
-          setMessages((prev) => [...prev, msg]);
-        },
         onError: (err) => {
           console.error(err);
           setIsVoiceActive(false);
