@@ -163,6 +163,11 @@ async function startServer() {
             thinking_config: {
               thinking_budget: 0,
             },
+            speech_config: {
+              voice_config: {
+                prebuilt_voice_config: { voice_name: "Charon" },
+              },
+            },
           },
           system_instruction: {
             parts: [{ text: SYSTEM_PROMPT }],
