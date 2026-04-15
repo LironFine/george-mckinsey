@@ -195,15 +195,9 @@ export class VoiceService {
               const isUpdateCommand = hasAction && hasSubject;
 
               if (isUpdateCommand) {
+                // Let Chat.tsx decide what to tell Gemini (depends on whether
+                // the client name is already known or needs to be asked)
                 callbacks.onVoiceCommand?.("updateClientFile");
-                // Tell Gemini to be silent — the UI handles this action
-                // (best-effort: may arrive before Gemini starts responding)
-                if (this.ws && this.isConnected) {
-                  this.ws.send(JSON.stringify({
-                    type: "text",
-                    payload: { text: "אמור רק: 'בסדר, מכין.' ואל תוסיף דבר נוסף." },
-                  }));
-                }
                 // Don't add to transcription — it's a command, not content
                 continue;
               }

@@ -440,13 +440,14 @@ ${voiceUserLines.join('\n')}
         onVoiceCommand: (command) => {
           if (command === 'updateClientFile') {
             if (clientName) {
-              // Name already known — run immediately
+              // Name already known — tell George to confirm briefly, then run
+              voiceService.sendTextMessage("אמור: 'בסדר, מכין.' ולא יותר.");
               handleUpdateClientFile();
             } else {
-              // Ask for name via voice, then proceed
+              // Need the name — tell George to ask for it, then wait
               isWaitingForVoiceNameRef.current = true;
               voiceService.sendTextMessage(
-                "שאל את המשתמש: 'מה שמך?' — ואז תחכה לתשובה."
+                "שאל את המשתמש: 'מה שמך?' ותחכה בשקט לתשובה."
               );
             }
           }
