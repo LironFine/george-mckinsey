@@ -241,28 +241,19 @@ export class VoiceService {
     message: any,
     callbacks: { onTranscription?: (text: string, role: "user" | "model") => void }
   ) {
-    // ── Model turn: collect audio + TEXT modality transcription ────────────
+    // ── Model turn: play audio chunks ───────────────────────────────────────
+    // (Native audio model — no TEXT modality available; user transcription
+    //  is handled separately via Web Speech API)
     const parts = message.serverContent?.modelTurn?.parts || [];
     for (const part of parts) {
       if (part?.inlineData?.data) {
-        // Audio chunk → play it
         this.playAudioChunk(part.inlineData.data);
       }
-      if (part?.text) {
-        // TEXT modality — accumulate for transcription
-        this.outputTranscriptBuffer += part.text;
-      }
     }
 
-    // ── Turn complete — flush buffered model transcription ─────────────────
-    if (message.serverContent?.turnComplete) {
-      this.flushOutputTranscript(callbacks);
-    }
-
-    // ── Interruption — stop playback, discard partial transcript ───────────
+    // ── Interruption — stop playback ────────────────────────────────────────
     if (message.serverContent?.interrupted) {
       this.stopPlayback();
-      this.outputTranscriptBuffer = "";
     }
   }
 

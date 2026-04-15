@@ -203,37 +203,67 @@ export default function Chat({ externalInput }: { externalInput?: string }) {
     setIsLoading(true);
     try {
       let summary = "";
-      
+
       if (hasHistory || hasVoiceHistory) {
-        // Combine text and voice history for a complete summary
+        // Separate voice-only user transcriptions (from Web Speech API)
+        const voiceUserLines = voiceHistory
+          .filter((v) => v.role === "user")
+          .map((v) => `• ${v.content}`);
+        const hasVoiceUserLines = voiceUserLines.length > 0;
+
+        // Build the history to send (text messages only — voice messages
+        // appear in currentMessages already if transcription was active)
         const combinedHistory = [...currentMessages];
-        if (hasVoiceHistory) {
-          voiceHistory.forEach((v, i) => {
+
+        let summaryContent: string;
+
+        if (hasVoiceUserLines && !hasHistory) {
+          // Voice-only session: we have what the user said but not the AI's
+          // responses (native audio model can't output text). Ask Gemini to
+          // reconstruct both sides based on the user's questions and its role.
+          summaryContent = `ניהלתי שיחה קולית עם ${finalName}.
+
+להלן הנושאים והשאלות שהעלה ${finalName} במהלך השיחה הקולית:
+${voiceUserLines.join('\n')}
+
+אנא כתוב סיכום מקצועי של הפגישה בגוף ראשון, כאילו אתה ג'ורג' מקינזי מסכם אותה.
+הסיכום יכלול:
+1. הנושאים המרכזיים שעלו בשיחה.
+2. הייעוץ האסטרטגי שנתת בכל נושא (בהתאם לשאלות שנשאלו ולגישתך המקינזייאנית).
+3. המלצות ברורות לצעדים הבאים.
+
+אל תוסיף הקדמות. התחל ישירות בסיכום המקצועי.`;
+        } else {
+          // Text session (or mixed): standard summary from full history
+          if (hasVoiceUserLines) {
+            // Append voice topics at the end of the prompt as extra context
             combinedHistory.push({
-              id: `voice-${i}-${Date.now()}`,
-              role: v.role as 'user' | 'assistant',
-              content: v.content,
-              timestamp: Date.now()
+              id: `voice-ctx-${Date.now()}`,
+              role: 'user' as const,
+              content: `בנוסף לשיחה הטקסטואלית, ניהלנו גם שיחה קולית. נושאים שעלו בשיחה הקולית:\n${voiceUserLines.join('\n')}`,
+              timestamp: Date.now(),
             });
-          });
+          }
+
+          summaryContent = `אנא הכן סיכום מפורט ומקצועי של השיחה שלנו עבור תיק הלקוח של ${finalName}.
+
+חשוב מאוד: התבסס אך ורק על המידע שנאמר בשיחה הנוכחית. אל תמציא נושאים שלא דיברנו עליהם.
+
+הסיכום צריך לכלול:
+1. פירוט נושאי השיחה העיקריים.
+2. נקודות חשובות והחלטות שהתקבלו.
+3. המלצות אסטרטגיות להמשך המבוססות על השיחה.
+
+כתוב את הסיכום בצורה תמציתית אך מקיפה. אל תוסיף הקדמות, פשוט התחל בתוכן המקצועי.`;
         }
 
         const summaryPrompt: Message = {
           id: 'summary-request',
           role: 'user',
-          content: `אנא הכן סיכום מפורט ומקצועי של השיחה שלנו (כולל השיחה הקולית) עבור תיק הלקוח של ${finalName}. 
-          
-          חשוב מאוד: התבסס אך ורק על המידע שנאמר בשיחה הנוכחית. אל תמציא נושאים שלא דיברנו עליהם.
-          
-          הסיכום צריך לכלול:
-          1. פירוט נושאי השיחה העיקריים.
-          2. נקודות חשובות והחלטות שהתקבלו.
-          3. המלצות אסטרטגיות להמשך המבוססות על השיחה.
-          
-          כתוב את הסיכום בצורה תמציתית אך מקיפה. אל תוסיף הקדמות, פשוט התחל בתוכן המקצועי.`,
+          content: summaryContent,
           timestamp: Date.now()
         };
-        
+
         summary = await sendMessageToGemini([...combinedHistory, summaryPrompt]);
       } else {
         summary = "טרם בוצעה שיחה מהותית בסשן זה. תיק הלקוח נוצר כבסיס לעבודה עתידית.";

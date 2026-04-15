@@ -159,7 +159,7 @@ async function startServer() {
         setup: {
           model: "models/gemini-2.5-flash-native-audio-latest",
           generation_config: {
-            response_modalities: ["AUDIO", "TEXT"],  // TEXT gives us model transcription
+            response_modalities: ["AUDIO"],
             thinking_config: {
               thinking_budget: 0,
             },
