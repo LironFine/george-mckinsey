@@ -21,7 +21,8 @@ export class VoiceService {
 
   async start(callbacks: {
     history?: any[];
-    onTranscription?: (text: string, role: "user" | "model") => void;  // voice → text
+    onTranscription?: (text: string, role: "user" | "model") => void;
+    onVoiceCommand?: (command: "updateClientFile") => void;
     onError?: (error: any) => void;
     onClose?: () => void;
   }) {
@@ -165,10 +166,29 @@ export class VoiceService {
           for (let i = event.resultIndex; i < event.results.length; i++) {
             if (event.results[i].isFinal) {
               const text = event.results[i][0].transcript.trim();
-              if (text && this.isConnected) {
-                this.inputTranscriptBuffer = text;
-                this.flushInputTranscript(callbacks);
+              if (!text || !this.isConnected) continue;
+
+              // ── Detect voice commands ──────────────────────────────────
+              const lower = text.replace(/[.,!?]/g, "");
+              const isUpdateCommand =
+                lower.includes("עדכן תיק") ||
+                lower.includes("תעדכן תיק") ||
+                lower.includes("עדכון תיק") ||
+                lower.includes("הכן סיכום") ||
+                lower.includes("תכין סיכום") ||
+                lower.includes("הכינו סיכום") ||
+                lower.includes("צור סיכום") ||
+                lower.includes("תצור סיכום");
+
+              if (isUpdateCommand) {
+                callbacks.onVoiceCommand?.("updateClientFile");
+                // Don't add to transcription — it's a command, not content
+                continue;
               }
+              // ─────────────────────────────────────────────────────────
+
+              this.inputTranscriptBuffer = text;
+              this.flushInputTranscript(callbacks);
             }
           }
         };
@@ -191,19 +211,19 @@ export class VoiceService {
       }
       // ─────────────────────────────────────────────────────────────────────
 
-      // Send greeting
+      // Send immediate greeting — fire as soon as session is ready
       setTimeout(() => {
         if (this.isConnected && this.ws) {
           this.ws.send(
             JSON.stringify({
               type: "text",
               payload: {
-                text: "תפתח את השיחה עכשיו במשפט הבא בדיוק ואז תעצור ותקשיב: 'שלום, רצית לדבר איתי? אני כאן.'",
+                text: "אמור עכשיו בדיוק את המשפט הזה ולא יותר: 'אני כאן, אפשר לדבר איתי.' ואז השתתק ותקשיב.",
               },
             })
           );
         }
-      }, 800);
+      }, 200);
 
       // Send prior chat history as context
       const history = callbacks.history || [];

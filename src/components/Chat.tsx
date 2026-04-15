@@ -419,6 +419,11 @@ ${voiceUserLines.join('\n')}
         history: messages,
         // Save voice transcriptions into chat history so they appear in the UI
         // and get included in client file summaries
+        onVoiceCommand: (command) => {
+          if (command === 'updateClientFile') {
+            handleUpdateClientFile();
+          }
+        },
         onTranscription: (text, role) => {
           const voiceMsg: Message = {
             id: `voice-${Date.now()}-${Math.random().toString(36).slice(2)}`,
