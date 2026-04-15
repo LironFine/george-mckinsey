@@ -160,9 +160,6 @@ async function startServer() {
           model: "models/gemini-2.5-flash-native-audio-latest",
           generation_config: {
             response_modalities: ["AUDIO"],
-            thinking_config: {
-              thinking_budget: 1024,
-            },
             speech_config: {
               voice_config: {
                 prebuilt_voice_config: { voice_name: "Charon" },
