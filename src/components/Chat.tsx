@@ -28,6 +28,9 @@ export default function Chat({ externalInput }: { externalInput?: string }) {
   const voiceStartTimeRef = useRef<number>(0);
   // When true, the next voice transcription from the user is captured as the client name
   const isWaitingForVoiceNameRef = useRef(false);
+  // State-driven voice commands — avoids stale closure when calling handleUpdateClientFile
+  const [pendingVoiceCommand, setPendingVoiceCommand] = useState<'updateClientFile' | null>(null);
+  const [pendingVoiceName, setPendingVoiceName] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -43,6 +46,31 @@ export default function Chat({ externalInput }: { externalInput?: string }) {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Voice command: updateClientFile — runs with fresh state (avoids stale closure)
+  useEffect(() => {
+    if (!pendingVoiceCommand) return;
+    setPendingVoiceCommand(null);
+
+    if (pendingVoiceCommand === 'updateClientFile') {
+      if (clientName) {
+        voiceService.sendTextMessage("אמור: 'בסדר, מכין.' ולא יותר.");
+        handleUpdateClientFile();
+      } else {
+        isWaitingForVoiceNameRef.current = true;
+        voiceService.sendTextMessage("שאל את המשתמש: 'מה שמך?' ותחכה בשקט לתשובה.");
+      }
+    }
+  }, [pendingVoiceCommand]);  // eslint-disable-line
+
+  // Voice name captured — run the file update with fresh state
+  useEffect(() => {
+    if (pendingVoiceName === null) return;
+    const name = pendingVoiceName;
+    setPendingVoiceName(null);
+    setClientName(name);
+    handleUpdateClientFile(name);
+  }, [pendingVoiceName]);  // eslint-disable-line
 
   const handleSend = async (contentOverride?: string) => {
     const messageContent = contentOverride || input;
@@ -439,26 +467,17 @@ ${voiceUserLines.join('\n')}
         history: messages,
         onVoiceCommand: (command) => {
           if (command === 'updateClientFile') {
-            if (clientName) {
-              // Name already known — tell George to confirm briefly, then run
-              voiceService.sendTextMessage("אמור: 'בסדר, מכין.' ולא יותר.");
-              handleUpdateClientFile();
-            } else {
-              // Need the name — tell George to ask for it, then wait
-              isWaitingForVoiceNameRef.current = true;
-              voiceService.sendTextMessage(
-                "שאל את המשתמש: 'מה שמך?' ותחכה בשקט לתשובה."
-              );
-            }
+            // Use state instead of calling directly — avoids stale closure.
+            // The useEffect above fires after the next render with fresh state.
+            setPendingVoiceCommand('updateClientFile');
           }
         },
         onTranscription: (text, role) => {
-          // If we're waiting for the user to say their name via voice — capture it
+          // Waiting for user to say their name via voice
           if (role === 'user' && isWaitingForVoiceNameRef.current) {
             isWaitingForVoiceNameRef.current = false;
-            setClientName(text);
-            handleUpdateClientFile(text);
-            return; // don't add to chat as a regular message
+            setPendingVoiceName(text); // triggers useEffect above with fresh state
+            return;
           }
 
           const voiceMsg: Message = {

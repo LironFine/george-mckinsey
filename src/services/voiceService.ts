@@ -12,6 +12,7 @@ export class VoiceService {
   private inputTranscriptBuffer: string = "";   // accumulates user speech (Web Speech API)
   private outputTranscriptBuffer: string = "";  // accumulates model speech (Gemini TEXT modality)
   private recognition: any = null;             // Web Speech API instance
+  private isBargingIn: boolean = false;        // true while user is interrupting — block incoming audio
 
   constructor() {}
 
@@ -124,9 +125,12 @@ export class VoiceService {
         if (!this.isConnected || !this.ws) return;
         const { rms, channelData } = event.data;
 
-        // Interrupt AI speech when user starts talking
-        if (rms > 0.01) {
+        // Interrupt AI speech when user starts talking.
+        // Threshold 0.05 (was 0.01) — avoids false triggers from background noise.
+        // isBargingIn flag blocks new audio chunks until Gemini confirms the interruption.
+        if (rms > 0.05 && !this.isBargingIn) {
           this.stopPlayback();
+          this.isBargingIn = true;
         }
 
         const pcmData = this.float32ToInt16(new Float32Array(channelData));
@@ -287,9 +291,10 @@ export class VoiceService {
       }
     }
 
-    // ── Interruption — stop playback ────────────────────────────────────────
+    // ── Interruption confirmed by Gemini — stop playback, allow new audio ───
     if (message.serverContent?.interrupted) {
       this.stopPlayback();
+      this.isBargingIn = false;  // Gemini acknowledged; resume accepting audio
     }
   }
 
@@ -316,7 +321,9 @@ export class VoiceService {
   }
 
   private playAudioChunk(base64Data: string) {
-    if (!this.audioContext) return;
+    // Don't queue audio while the user is interrupting —
+    // prevents mid-sentence restarts after barge-in
+    if (!this.audioContext || this.isBargingIn) return;
 
     const binaryString = atob(base64Data);
     const len = binaryString.length;
@@ -383,6 +390,7 @@ export class VoiceService {
     this.isConnected = false;
     this.inputTranscriptBuffer = "";
     this.outputTranscriptBuffer = "";
+    this.isBargingIn = false;
     try { this.recognition?.stop(); } catch {}
     this.recognition = null;
 
