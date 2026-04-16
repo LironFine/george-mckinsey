@@ -39,6 +39,8 @@ export default function Chat({ externalInput, user }: { externalInput?: string; 
   const loadedUidRef = useRef<string | null>(null);
   // Prevent re-triggering auto-save when an error state is set
   const saveErrorShownRef = useRef(false);
+  // Prevent saving immediately after loading history from Firestore
+  const justLoadedRef = useRef(false);
 
   // ── Load history when user signs in ────────────────────────────────────────
   useEffect(() => {
@@ -51,6 +53,7 @@ export default function Chat({ externalInput, user }: { externalInput?: string; 
 
     loadSession(user.uid).then((session) => {
       if (session && session.messages.length > 1) {
+        justLoadedRef.current = true; // skip the next auto-save (it's a load, not a change)
         setMessages(session.messages);
         if (session.clientName) setClientName(session.clientName);
         console.log('[Chat] history restored from Firestore');
@@ -64,6 +67,8 @@ export default function Chat({ externalInput, user }: { externalInput?: string; 
   // ── Auto-save to Firestore whenever messages change (2 s debounce) ─────────
   useEffect(() => {
     if (!user || messages.length <= 1) return;
+    // Skip the very first trigger that fires right after loading from Firestore
+    if (justLoadedRef.current) { justLoadedRef.current = false; return; }
     // Don't re-trigger the save cycle if there's already a known error
     if (saveErrorShownRef.current) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
