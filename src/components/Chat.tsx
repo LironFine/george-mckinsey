@@ -437,7 +437,7 @@ ${voiceUserLines.join('\n')}
       const assistantMessage: Message = {
         id: Date.now().toString(),
         role: 'assistant',
-        content: `הבריף לקופירייטר הוכן והורד למחשבך. תוכל להעביר אותו כעת לג'מה או קלודין לביצוע הקופי.`,
+        content: `הבריף לקופירייטרים הוכן והורד למחשבך. אפשר להעביר להם אותו.`,
         timestamp: Date.now(),
       };
       setMessages((prev) => [...prev, assistantMessage]);
@@ -569,22 +569,6 @@ ${voiceUserLines.join('\n')}
 
   return (
     <div className="flex flex-col h-full glass-panel rounded-3xl overflow-hidden">
-      {/* Iframe banner — shown only when embedded, guides user to open in new tab for voice */}
-      {isInIframe && (
-        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center justify-between gap-3 shrink-0">
-          <span className="text-xs text-amber-800">
-            🎙️ לשיחה קולית יש לפתוח בחלון נפרד
-          </span>
-          <a
-            href={window.location.href}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs font-medium px-3 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-full transition-colors shrink-0"
-          >
-            פתח בחלון מלא ↗
-          </a>
-        </div>
-      )}
       {/* Voice Status Overlay */}
       {isVoiceActive && (
         <div 
@@ -783,6 +767,18 @@ ${voiceUserLines.join('\n')}
             <span className="truncate">פגישה עם לירון פיין</span>
             <ExternalLink size={8} className="opacity-70 sm:w-[10px] sm:h-[10px]" />
           </a>
+          {isInIframe && (
+            <a
+              href={window.location.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-1.5 px-2 py-1.5 sm:px-4 sm:py-2 bg-amber-50 text-amber-700 rounded-full text-[9px] sm:text-[11px] font-medium hover:bg-amber-100 transition-colors border border-amber-200"
+            >
+              <Mic size={12} className="sm:w-[14px] sm:h-[14px]" />
+              <span className="truncate">שיחה קולית בחלון נפרד</span>
+              <ExternalLink size={8} className="opacity-70 sm:w-[10px] sm:h-[10px]" />
+            </a>
+          )}
         </div>
 
         <div className="text-center mt-3 text-[10px] text-slate-400 flex items-center justify-center gap-2">
