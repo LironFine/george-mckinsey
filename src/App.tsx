@@ -160,28 +160,35 @@ export default function App() {
     <ErrorBoundary>
       <div className="flex flex-col h-full bg-slate-50 overflow-hidden">
         {/* Header */}
-        <header className="h-14 bg-white border-b border-slate-100 px-6 flex items-center justify-between shrink-0 z-50">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-lg shadow-blue-200">
-              <Briefcase size={18} />
+        <header className="h-14 bg-white border-b border-slate-100 shrink-0 z-50">
+          {/* Inner container mirrors the main layout so content aligns with chat column only */}
+          <div className="flex h-full max-w-7xl mx-auto w-full px-2 lg:px-4 gap-6">
+            {/* Desktop: sidebar-width placeholder so title+user stay within chat column */}
+            <div className="hidden lg:block shrink-0 w-72" />
+            {/* Chat column header — title LEFT, user RIGHT */}
+            <div className="flex-1 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-lg shadow-blue-200">
+                  <Briefcase size={18} />
+                </div>
+                <div>
+                  <h1 className="text-lg font-bold text-slate-900 leading-tight">האסטרטג ג'ורג'</h1>
+                  <p className="text-[10px] text-slate-500">יועץ אסטרטגי שיווקי</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <AuthButton user={user} />
+                <button
+                  onClick={() => setIsMobileMenuOpen(true)}
+                  className="lg:hidden flex flex-col items-center gap-0.5 group"
+                >
+                  <div className="w-10 h-10 bg-red-500 rounded-xl flex items-center justify-center text-white shadow-md shadow-red-100 group-hover:bg-red-600 transition-all">
+                    <Briefcase size={20} />
+                  </div>
+                  <span className="text-[9px] font-bold text-red-600 uppercase tracking-tighter">כלים</span>
+                </button>
+              </div>
             </div>
-            <div>
-              <h1 className="text-lg font-bold text-slate-900 leading-tight">יועץ אסטרטגי שיווקי</h1>
-              <p className="text-[10px] text-slate-500">מומחה צמיחה לעסקים קטנים</p>
-            </div>
-          </div>
-          
-          <div className="flex items-center gap-2">
-            <AuthButton user={user} />
-            <button
-              onClick={() => setIsMobileMenuOpen(true)}
-              className="lg:hidden flex flex-col items-center gap-0.5 group"
-            >
-            <div className="w-10 h-10 bg-red-500 rounded-xl flex items-center justify-center text-white shadow-md shadow-red-100 group-hover:bg-red-600 transition-all">
-              <Briefcase size={20} />
-            </div>
-            <span className="text-[9px] font-bold text-red-600 uppercase tracking-tighter">כלים</span>
-          </button>
           </div>
         </header>
 
@@ -206,11 +213,13 @@ export default function App() {
 
         {/* Main Content */}
         <main className="flex-1 flex max-w-7xl mx-auto w-full p-2 lg:p-4 gap-6 relative overflow-hidden items-stretch">
-          <div className="flex-1 min-w-0 h-full overflow-hidden">
-            <Chat externalInput={externalInput} user={user} />
-          </div>
+          {/* Sidebar FIRST — in RTL flex this places it on the RIGHT */}
           <div className="hidden lg:block h-full shrink-0">
             <Sidebar onSelectModel={handleSelectModel} />
+          </div>
+          {/* Chat SECOND — in RTL flex this places it on the LEFT */}
+          <div className="flex-1 min-w-0 h-full overflow-hidden">
+            <Chat externalInput={externalInput} user={user} />
           </div>
         </main>
       </div>
