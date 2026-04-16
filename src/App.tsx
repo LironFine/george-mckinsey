@@ -161,13 +161,21 @@ export default function App() {
       <div className="flex flex-col h-full bg-slate-50 overflow-hidden">
         {/* Header */}
         <header className="h-14 bg-white border-b border-slate-100 shrink-0 z-50">
-          {/* Inner container mirrors the main layout so content aligns with chat column only */}
           <div className="flex h-full max-w-7xl mx-auto w-full px-2 lg:px-4 gap-6">
-            {/* Desktop: sidebar-width placeholder so title+user stay within chat column */}
-            <div className="hidden lg:block shrink-0 w-72" />
-            {/* Chat column header — title LEFT, user RIGHT */}
+            {/* Desktop RIGHT (first in RTL, w-72): title — sits above the sidebar */}
+            <div className="hidden lg:flex shrink-0 w-72 items-center gap-2">
+              <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-lg shadow-blue-200">
+                <Briefcase size={18} />
+              </div>
+              <div>
+                <h1 className="text-lg font-bold text-slate-900 leading-tight">האסטרטג ג'ורג'</h1>
+                <p className="text-[10px] text-slate-500">יועץ אסטרטגי שיווקי</p>
+              </div>
+            </div>
+            {/* Desktop LEFT (second in RTL, flex-1): user name — sits above chat */}
             <div className="flex-1 flex items-center justify-between">
-              <div className="flex items-center gap-2">
+              {/* Mobile only: title on left */}
+              <div className="flex lg:hidden items-center gap-2">
                 <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-lg shadow-blue-200">
                   <Briefcase size={18} />
                 </div>
@@ -176,7 +184,8 @@ export default function App() {
                   <p className="text-[10px] text-slate-500">יועץ אסטרטגי שיווקי</p>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              {/* User name + mobile menu (right on mobile, left on desktop) */}
+              <div className="flex items-center gap-2 lg:mr-auto">
                 <AuthButton user={user} />
                 <button
                   onClick={() => setIsMobileMenuOpen(true)}
