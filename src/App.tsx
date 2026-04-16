@@ -91,6 +91,8 @@ export default function App() {
         .then((data) => {
           if (data.valid) {
             sessionStorage.setItem('wix_access', 'true');
+            // Also store in localStorage so new tabs (e.g. "open in full window") work too
+            localStorage.setItem('wix_access_exp', String(Date.now() + 24 * 60 * 60 * 1000));
             setTokenValid(true);
             window.history.replaceState({}, '', window.location.pathname);
           } else {
@@ -105,6 +107,10 @@ export default function App() {
     // No token in URL — check sessionStorage (same tab navigation)
     const stored = sessionStorage.getItem('wix_access');
     if (stored === 'true') { setTokenValid(true); return; }
+
+    // Check localStorage (covers "open in new tab" from within the iframe)
+    const lsExp = Number(localStorage.getItem('wix_access_exp') || '0');
+    if (lsExp && Date.now() < lsExp) { setTokenValid(true); return; }
 
     // Check if server has no secret configured (dev/direct access allowed)
     fetch('/api/validate-token')
