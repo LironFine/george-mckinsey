@@ -90,11 +90,8 @@ export default function App() {
         .then((r) => r.json())
         .then((data) => {
           if (data.valid) {
-            sessionStorage.setItem('wix_access', 'true');
-            // Also store in localStorage so new tabs (e.g. "open in full window") work too
-            localStorage.setItem('wix_access_exp', String(Date.now() + 24 * 60 * 60 * 1000));
+            // Keep token in URL so "open in full window" passes it to the new tab
             setTokenValid(true);
-            window.history.replaceState({}, '', window.location.pathname);
           } else {
             console.warn('[Auth] Wix token invalid:', data.reason);
             setTokenValid(false);
@@ -104,15 +101,7 @@ export default function App() {
       return;
     }
 
-    // No token in URL — check sessionStorage (same tab navigation)
-    const stored = sessionStorage.getItem('wix_access');
-    if (stored === 'true') { setTokenValid(true); return; }
-
-    // Check localStorage (covers "open in new tab" from within the iframe)
-    const lsExp = Number(localStorage.getItem('wix_access_exp') || '0');
-    if (lsExp && Date.now() < lsExp) { setTokenValid(true); return; }
-
-    // Check if server has no secret configured (dev/direct access allowed)
+    // No token in URL — validate with server (dev mode check)
     fetch('/api/validate-token')
       .then((r) => r.json())
       .then((data) => setTokenValid(data.dev === true ? true : false))
