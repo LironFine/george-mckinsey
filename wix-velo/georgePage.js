@@ -12,10 +12,6 @@ import { generateGeorgeToken } from 'backend/georgeToken.jsw';
 const GEORGE_URL = 'https://george-mckinsey-production.up.railway.app/';
 
 $w.onReady(async function () {
-  // התאם גובה ל-viewport המלא (מונע חיתוך במובייל)
-  const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
-  $w('#georgeFrame').style.height = `${Math.max(vh, 700)}px`;
-
   try {
     const token = await generateGeorgeToken();
     $w('#georgeFrame').src = `${GEORGE_URL}?token=${encodeURIComponent(token)}`;

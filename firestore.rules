@@ -23,6 +23,11 @@ service cloud.firestore {
                       request.resource.data.count == resource.data.count + 1;
     }
 
+    // ── Demo usage tracking ─────────────────────────────────────────
+    match /demo_usage/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
     // Default deny everything else
     match /{path=**} {
       allow read, write: if false;

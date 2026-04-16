@@ -34,7 +34,11 @@ async function startServer() {
     if (!secret) return res.json({ valid: true, dev: true });
 
     const token = (req.query.token as string) || "";
-    if (!token) return res.json({ valid: false, reason: "no_token" });
+    if (!token) {
+      const demoMode = (process.env.DEMO_MODE || "").trim().toLowerCase() === "true";
+      if (demoMode) return res.json({ valid: true, demo: true });
+      return res.json({ valid: false, reason: "no_token" });
+    }
 
     try {
       const dotIndex = token.lastIndexOf(".");

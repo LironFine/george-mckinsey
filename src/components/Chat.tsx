@@ -8,10 +8,10 @@ import { Message } from '../types';
 import { sendMessageToGemini } from '../services/gemini';
 import { INITIAL_MESSAGE } from '../constants';
 import { voiceService } from '../services/voiceService';
-import { checkAndIncrementUsage, checkVoiceMinutesAvailable, recordVoiceUsage, setVisitorId } from '../services/usageService';
+import { checkAndIncrementUsage, checkVoiceMinutesAvailable, recordVoiceUsage, setVisitorId, incrementDemoTextUsage, incrementDemoVoiceUsage } from '../services/usageService';
 import { saveSession, loadSession } from '../services/historyService';
 
-export default function Chat({ externalInput, user }: { externalInput?: string; user?: FirebaseUser | null }) {
+export default function Chat({ externalInput, user, isDemo }: { externalInput?: string; user?: FirebaseUser | null; isDemo?: boolean }) {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -28,6 +28,8 @@ export default function Chat({ externalInput, user }: { externalInput?: string; 
   const [isWaitingForName, setIsWaitingForName] = useState(false);
   const [isVoiceActive, setIsVoiceActive] = useState(false);
   const [cloudStatus, setCloudStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [demoExhausted, setDemoExhausted] = useState(false);
+  const [demoWarning, setDemoWarning] = useState<string | null>(null);
   const voiceStartTimeRef = useRef<number>(0);
   // Always-fresh messages ref — updated synchronously every render so voice
   // callbacks (onClose) always read the latest messages, even before React re-renders
@@ -127,32 +129,39 @@ export default function Chat({ externalInput, user }: { externalInput?: string; 
 
     // Check usage limit before sending to Gemini
     if (!contentOverride) {
-      const { allowed, remaining } = await checkAndIncrementUsage();
-      if (!allowed) {
-        const limitMessage: Message = {
-          id: Date.now().toString(),
-          role: 'assistant',
-          content: 'הגעת למכסת ההודעות היומית שלך (100 הודעות). ג\'ורג\' צריך לנוח קצת כדי להישאר חד. נחזור לדבר מחר!',
-          timestamp: Date.now(),
-        };
-        setMessages((prev) => [...prev, limitMessage]);
-        return;
-      }
+      if (isDemo && user) {
+        const { allowed, remaining } = await incrementDemoTextUsage(user.uid);
+        if (!allowed) {
+          triggerDemoEnd();
+          return;
+        }
+        if (remaining <= 3 && remaining > 0) {
+          setDemoWarning(`נותרו לך ${remaining} הודעות בגרסת הניסיון`);
+        }
+      } else {
+        const { allowed, remaining } = await checkAndIncrementUsage();
+        if (!allowed) {
+          const limitMessage: Message = {
+            id: Date.now().toString(),
+            role: 'assistant',
+            content: 'הגעת למכסת ההודעות היומית שלך (100 הודעות). ג\'ורג\' צריך לנוח קצת כדי להישאר חד. נחזור לדבר מחר!',
+            timestamp: Date.now(),
+          };
+          setMessages((prev) => [...prev, limitMessage]);
+          return;
+        }
 
-      // Auto-download at 90 messages (10 remaining)
-      if (remaining === 10) {
-        const warningMessage: Message = {
-          id: 'warning-' + Date.now(),
-          role: 'assistant',
-          content: 'שים לב: נותרו לך 10 הודעות אחרונות למכסה היומית. אני מבצע כעת גיבוי אוטומטי של תיק הלקוח שלך כדי שלא תאבד שום דבר.',
-          timestamp: Date.now(),
-        };
-        setMessages((prev) => [...prev, warningMessage]);
-        // Delay slightly to ensure the message is seen
-        setTimeout(() => handleUpdateClientFile(), 1000);
+        if (remaining === 10) {
+          const warningMessage: Message = {
+            id: 'warning-' + Date.now(),
+            role: 'assistant',
+            content: 'שים לב: נותרו לך 10 הודעות אחרונות למכסה היומית. אני מבצע כעת גיבוי אוטומטי של תיק הלקוח שלך.',
+            timestamp: Date.now(),
+          };
+          setMessages((prev) => [...prev, warningMessage]);
+          setTimeout(() => handleUpdateClientFile(), 1000);
+        }
       }
-
-      console.log(`Usage allowed. Remaining messages: ${remaining}`);
     }
 
     if (isWaitingForName && !contentOverride) {
@@ -223,6 +232,10 @@ export default function Chat({ externalInput, user }: { externalInput?: string; 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (isDemo) {
+      alert('העלאת תיק לקוח זמינה למנויים בלבד.\nהירשם כמנוי כדי ליהנות מכל הכלים.');
+      return;
+    }
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -416,6 +429,10 @@ ${voiceUserLines.join('\n')}
   messagesRef.current = messages;
 
   const handleDownloadBrief = async () => {
+    if (isDemo) {
+      alert('הורדת בריף לקופי זמינה למנויים בלבד.\nהירשם כמנוי כדי ליהנות מכל הכלים.');
+      return;
+    }
     if (messages.length <= 1 || isLoading) return;
 
     setIsLoading(true);
@@ -463,6 +480,40 @@ ${voiceUserLines.join('\n')}
     }
   };
 
+  const triggerDemoEnd = async () => {
+    setDemoExhausted(true);
+    setDemoWarning(null);
+    const endMessage: Message = {
+      id: 'demo-end-' + Date.now(),
+      role: 'assistant',
+      content: `הגעת לסוף גרסת הניסיון החינמית של ג'ורג'.\n\nכדי להמשיך ליהנות מכל הכלים — שיחות קוליות, תיקי לקוח, בריפים ועוד — הירשם כמנוי:\n\n**[הירשם כמנוי](https://www.pirsoomai.com/pricing-plans/list)**`,
+      timestamp: Date.now(),
+    };
+    setMessages((prev) => [...prev, endMessage]);
+
+    try {
+      const summaryPrompt: Message = {
+        id: 'demo-summary',
+        role: 'user',
+        content: 'סכם את השיחה הזו בקצרה — עיקרי הנושאים שדנו בהם.',
+        timestamp: Date.now(),
+      };
+      const summary = await sendMessageToGemini([...messages, summaryPrompt]);
+      const content = `--- גרסת ניסיון חינמית של ג'ורג' ---\nהשיחה הזו נוצרה בגרסת הניסיון החינמית.\nכדי להמשיך ליהנות מכל הכלים, הירשם כמנוי:\nhttps://www.pirsoomai.com/pricing-plans/list\n---\n\n${summary}`;
+      const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `סיכום שיחה - גרסת ניסיון ג'ורג'.txt`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to generate demo summary:', err);
+    }
+  };
+
   const handleNewChat = () => {
     setMessages([
       {
@@ -487,13 +538,16 @@ ${voiceUserLines.join('\n')}
   };
 
   const toggleVoice = async () => {
+    if (isDemo) {
+      alert('שיחה קולית זמינה למנויים בלבד.\nהירשם כמנוי כדי ליהנות מכל הכלים.');
+      return;
+    }
+
     if (isVoiceActive) {
       voiceService.stop();
-      // Record actual minutes used in this session
       recordVoiceUsage(voiceStartTimeRef.current);
       setIsVoiceActive(false);
     } else {
-      // Check browser support
       if (!window.WebSocket) {
         setMessages((prev) => [
           ...prev,
@@ -683,6 +737,26 @@ ${voiceUserLines.join('\n')}
 
       {/* Input and Actions Area */}
       <div className="p-2 sm:p-4 bg-white border-t border-slate-100">
+        {demoWarning && (
+          <div className="max-w-4xl mx-auto mb-2 px-4 py-2 bg-amber-50 border border-amber-200 rounded-xl text-center text-xs text-amber-700 font-medium">
+            {demoWarning} — <a href="https://www.pirsoomai.com/pricing-plans/list" target="_blank" rel="noopener noreferrer" className="underline font-bold">הירשם כמנוי</a>
+          </div>
+        )}
+
+        {demoExhausted ? (
+          <div className="max-w-4xl mx-auto text-center py-6">
+            <p className="text-slate-600 mb-4 text-sm">גרסת הניסיון החינמית הסתיימה. הסיכום הורד למחשבך.</p>
+            <a
+              href="https://www.pirsoomai.com/pricing-plans/list"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-block px-8 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-colors shadow-lg"
+            >
+              הירשם כמנוי כדי להמשיך
+            </a>
+          </div>
+        ) : (<>
+
         <div className="relative flex items-center gap-2 max-w-4xl mx-auto mb-2 sm:mb-4">
           <input
             type="file"
@@ -785,6 +859,7 @@ ${voiceUserLines.join('\n')}
             <ExternalLink size={8} className="opacity-70 sm:w-[10px] sm:h-[10px]" />
           </a>
         </div>
+        </>)}
 
         <div className="text-center mt-3 text-[10px] text-slate-400 flex items-center justify-center gap-2">
           <Sparkles size={10} />

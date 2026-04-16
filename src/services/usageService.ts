@@ -1,3 +1,6 @@
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
+
 const DAILY_LIMIT = 100;
 const MONTHLY_VOICE_MINUTES_LIMIT = 90; // ~8 NIS worth of Gemini Live API
 
@@ -104,4 +107,54 @@ export async function checkAndIncrementVoiceUsage(): Promise<{
 }> {
   const result = await checkVoiceMinutesAvailable();
   return { allowed: result.allowed, remaining: result.remainingMinutes, resetDays: result.resetDays };
+}
+
+// ── Demo usage (Firestore — lifetime per user) ──────────────────────
+
+const DEMO_TEXT_LIMIT = 20;
+const DEMO_VOICE_LIMIT = 2;
+
+interface DemoUsage {
+  textCount: number;
+  voiceCount: number;
+}
+
+async function getDemoUsage(uid: string): Promise<DemoUsage> {
+  if (!db || !uid) return { textCount: 0, voiceCount: 0 };
+  try {
+    const ref = doc(db, 'demo_usage', uid);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) return { textCount: 0, voiceCount: 0 };
+    const data = snap.data();
+    return { textCount: data.textCount || 0, voiceCount: data.voiceCount || 0 };
+  } catch (err) {
+    console.error('[Demo] Failed to get usage:', err);
+    return { textCount: 0, voiceCount: 0 };
+  }
+}
+
+async function saveDemoUsage(uid: string, usage: DemoUsage): Promise<void> {
+  if (!db || !uid) return;
+  try {
+    const ref = doc(db, 'demo_usage', uid);
+    await setDoc(ref, usage, { merge: true });
+  } catch (err) {
+    console.error('[Demo] Failed to save usage:', err);
+  }
+}
+
+export async function incrementDemoTextUsage(uid: string): Promise<{ allowed: boolean; remaining: number }> {
+  const usage = await getDemoUsage(uid);
+  if (usage.textCount >= DEMO_TEXT_LIMIT) return { allowed: false, remaining: 0 };
+  usage.textCount += 1;
+  await saveDemoUsage(uid, usage);
+  return { allowed: true, remaining: DEMO_TEXT_LIMIT - usage.textCount };
+}
+
+export async function incrementDemoVoiceUsage(uid: string): Promise<{ allowed: boolean; remaining: number }> {
+  const usage = await getDemoUsage(uid);
+  if (usage.voiceCount >= DEMO_VOICE_LIMIT) return { allowed: false, remaining: 0 };
+  usage.voiceCount += 1;
+  await saveDemoUsage(uid, usage);
+  return { allowed: true, remaining: DEMO_VOICE_LIMIT - usage.voiceCount };
 }

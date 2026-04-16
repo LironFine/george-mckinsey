@@ -4,7 +4,7 @@ import { auth } from './lib/firebase';
 import Chat from './components/Chat';
 import Sidebar from './components/Sidebar';
 import AuthButton from './components/AuthButton';
-import { Briefcase, X, AlertTriangle, Lock, ExternalLink } from 'lucide-react';
+import { Briefcase, X, AlertTriangle, Lock, ExternalLink, Sparkles } from 'lucide-react';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -71,8 +71,8 @@ export default function App() {
   const [externalInput, setExternalInput] = React.useState<string | undefined>(undefined);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [user, setUser] = useState<User | null>(null);
-  // null = checking, true = allowed, false = blocked
   const [tokenValid, setTokenValid] = useState<boolean | null>(null);
+  const [isDemo, setIsDemo] = useState(false);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, setUser);
@@ -85,26 +85,34 @@ export default function App() {
     const token = params.get('token');
 
     if (token) {
-      // Validate token with server, then remove it from URL
       fetch(`/api/validate-token?token=${encodeURIComponent(token)}`)
         .then((r) => r.json())
         .then((data) => {
           if (data.valid) {
-            // Keep token in URL so "open in full window" passes it to the new tab
             setTokenValid(true);
+            setIsDemo(false);
           } else {
             console.warn('[Auth] Wix token invalid:', data.reason);
             setTokenValid(false);
           }
         })
-        .catch(() => setTokenValid(true)); // network error → allow (fail open)
+        .catch(() => setTokenValid(true));
       return;
     }
 
-    // No token in URL — validate with server (dev mode check)
     fetch('/api/validate-token')
       .then((r) => r.json())
-      .then((data) => setTokenValid(data.dev === true ? true : false))
+      .then((data) => {
+        if (data.dev === true) {
+          setTokenValid(true);
+          setIsDemo(false);
+        } else if (data.demo === true) {
+          setTokenValid(true);
+          setIsDemo(true);
+        } else {
+          setTokenValid(false);
+        }
+      })
       .catch(() => setTokenValid(true));
   }, []);
   // ─────────────────────────────────────────────────────────────────────────
@@ -154,6 +162,31 @@ export default function App() {
     );
   }
 
+  // Require Google sign-in
+  if (!user) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-slate-50 p-6 rtl">
+        <div className="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-sm w-full p-8 text-center">
+          <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4">
+            {isDemo ? <Sparkles size={28} className="text-blue-600" /> : <Briefcase size={28} className="text-blue-600" />}
+          </div>
+          <h2 className="text-xl font-bold text-slate-900 mb-2">
+            {isDemo ? 'נסה את ג\'ורג\' בחינם!' : 'האסטרטג ג\'ורג\''}
+          </h2>
+          <p className="text-slate-500 text-sm mb-6">
+            {isDemo
+              ? 'התחבר עם Google כדי להתחיל את גרסת הניסיון החינמית.'
+              : 'התחבר עם Google כדי לשמור את ההיסטוריה שלך.'}
+          </p>
+          <AuthButton user={null} />
+          {isDemo && (
+            <p className="text-[10px] text-slate-400 mt-4">גרסת ניסיון — 20 הודעות טקסט</p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   const isInIframe = window.self !== window.top;
 
   return (
@@ -186,6 +219,9 @@ export default function App() {
               </div>
               {/* User name + mobile menu (right on mobile, left on desktop) */}
               <div className="flex items-center gap-2 lg:mr-auto">
+                {isDemo && (
+                  <span className="text-[9px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold">גרסת ניסיון</span>
+                )}
                 <AuthButton user={user} />
                 <button
                   onClick={() => setIsMobileMenuOpen(true)}
@@ -228,7 +264,7 @@ export default function App() {
           </div>
           {/* Chat SECOND — in RTL flex this places it on the LEFT */}
           <div className="flex-1 min-w-0 h-full overflow-hidden">
-            <Chat externalInput={externalInput} user={user} />
+            <Chat externalInput={externalInput} user={user} isDemo={isDemo} />
           </div>
         </main>
       </div>
