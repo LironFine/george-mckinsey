@@ -50,7 +50,7 @@ async function startServer() {
 
       if (signature !== expected) return res.json({ valid: false, reason: "invalid_signature" });
 
-      const data = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf8"));
+      const data = JSON.parse(Buffer.from(payloadB64, "base64").toString("utf8"));
       if (Date.now() > data.exp) return res.json({ valid: false, reason: "expired" });
 
       return res.json({ valid: true, email: data.email });

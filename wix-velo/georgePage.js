@@ -20,8 +20,8 @@ $w.onReady(async function () {
     const token = await generateGeorgeToken();
     $w('#georgeFrame').src = `${GEORGE_URL}?token=${encodeURIComponent(token)}`;
   } catch (err) {
-    // המשתמש לא מחובר או אין לו מנוי — הצג הודעה
-    console.log('Token generation failed:', err.message);
+    // הצג את השגיאה המדויקת בקונסול (F12) לאבחון
+    console.error('George token error:', err.message || err);
     $w('#georgeFrame').src = `${GEORGE_URL}`; // יציג מסך "נדרש מנוי"
   }
 });

@@ -19,22 +19,35 @@ import { createHmac } from 'crypto';
  */
 export async function generateGeorgeToken() {
   // ודא שהמשתמש מחובר
-  const member = await currentMember.getMember();
-  if (!member) {
-    throw new Error('לא מחובר');
+  let member;
+  try {
+    member = await currentMember.getMember();
+  } catch (e) {
+    throw new Error('getMember failed: ' + e.message);
+  }
+  if (!member) throw new Error('לא מחובר — אין חבר פעיל');
+
+  let secret;
+  try {
+    secret = await getSecret('GEORGE_TOKEN_SECRET');
+  } catch (e) {
+    throw new Error('getSecret failed: ' + e.message);
   }
 
-  const secret = await getSecret('GEORGE_TOKEN_SECRET');
+  const payloadObj = {
+    email: member.loginEmail || (member.profile && member.profile.email) || 'unknown',
+    memberId: member._id,
+    exp: Date.now() + 24 * 60 * 60 * 1000, // תוקף: 24 שעות
+  };
 
-  const payload = Buffer.from(
-    JSON.stringify({
-      email: member.loginEmail,
-      memberId: member._id,
-      exp: Date.now() + 24 * 60 * 60 * 1000, // תוקף: 24 שעות
-    })
-  ).toString('base64url');
+  // base64 רגיל → המרה ל-base64url (תואם לכל גרסאות Node ב-Wix)
+  const payloadB64 = Buffer.from(JSON.stringify(payloadObj))
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '');
 
-  const signature = createHmac('sha256', secret).update(payload).digest('hex');
+  const signature = createHmac('sha256', secret).update(payloadB64).digest('hex');
 
-  return `${payload}.${signature}`;
+  return `${payloadB64}.${signature}`;
 }
