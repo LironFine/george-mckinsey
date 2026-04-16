@@ -172,8 +172,10 @@ async function startServer() {
     const uid = (req.query.uid as string) || "";
     if (!uid) return res.status(400).json({ error: "missing uid" });
 
-    const terminal = (process.env.CARDCOM_TERMINAL || "").trim();
-    const appUrl   = (process.env.APP_URL || "https://your-app.up.railway.app").trim();
+    const terminal    = (process.env.CARDCOM_TERMINAL    || "").trim();
+    const apiName     = (process.env.CARDCOM_API_NAME    || "").trim();
+    const apiPassword = (process.env.CARDCOM_API_PASSWORD || "").trim();
+    const appUrl      = (process.env.APP_URL || "https://your-app.up.railway.app").trim();
 
     if (!terminal) {
       return res.status(500).json({ error: "CARDCOM_TERMINAL not configured" });
@@ -182,6 +184,8 @@ async function startServer() {
     try {
       const params = new URLSearchParams({
         TerminalCode:       terminal,
+        APIName:            apiName,
+        APIPassword:        apiPassword,
         APILevel:           "10",
         DocumentId:         uid,
         CoinID:             "1",
