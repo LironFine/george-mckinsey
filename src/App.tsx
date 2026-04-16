@@ -167,21 +167,26 @@ export default function App() {
     return (
       <div className="h-screen flex items-center justify-center bg-slate-50 p-6 rtl">
         <div className="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-sm w-full p-8 text-center">
-          <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4">
-            {isDemo ? <Sparkles size={28} className="text-blue-600" /> : <Briefcase size={28} className="text-blue-600" />}
-          </div>
+          {isDemo ? (
+            <img
+              src="/george.JPG"
+              alt="האסטרטג ג'ורג' מקינזי"
+              className="w-28 h-28 rounded-full object-cover object-top mx-auto mb-4 shadow-lg"
+            />
+          ) : (
+            <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Briefcase size={28} className="text-blue-600" />
+            </div>
+          )}
           <h2 className="text-xl font-bold text-slate-900 mb-2">
-            {isDemo ? 'נסה את ג\'ורג\' בחינם!' : 'האסטרטג ג\'ורג\''}
+            {isDemo ? 'חינם ועכשיו' : 'האסטרטג ג\'ורג\''}
           </h2>
-          <p className="text-slate-500 text-sm mb-6">
+          <p className="text-slate-600 text-sm mb-6 leading-relaxed">
             {isDemo
-              ? 'התחבר עם Google כדי להתחיל את גרסת הניסיון החינמית.'
+              ? 'שיחת ייעוץ עם האסטרטג ג\'ורג\' מקינזי, לשידרוג מיידי של השיווק שלך'
               : 'התחבר עם Google כדי לשמור את ההיסטוריה שלך.'}
           </p>
           <AuthButton user={null} />
-          {isDemo && (
-            <p className="text-[10px] text-slate-400 mt-4">גרסת ניסיון — 20 הודעות טקסט</p>
-          )}
         </div>
       </div>
     );
@@ -197,9 +202,11 @@ export default function App() {
           <div className="flex h-full max-w-7xl mx-auto w-full px-2 lg:px-4 gap-6">
             {/* Desktop RIGHT (first in RTL, w-72): title — sits above the sidebar */}
             <div className="hidden lg:flex shrink-0 w-72 items-center gap-2">
-              <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-lg shadow-blue-200">
-                <Briefcase size={18} />
-              </div>
+              <img
+                src="/george.JPG"
+                alt="האסטרטג ג'ורג'"
+                className="w-9 h-9 rounded-full object-cover object-top shadow-md"
+              />
               <div>
                 <h1 className="text-lg font-bold text-slate-900 leading-tight">האסטרטג ג'ורג'</h1>
                 <p className="text-[10px] text-slate-500">יועץ אסטרטגי שיווקי</p>
@@ -209,9 +216,11 @@ export default function App() {
             <div className="flex-1 flex items-center justify-between">
               {/* Mobile only: title on left */}
               <div className="flex lg:hidden items-center gap-2">
-                <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-lg shadow-blue-200">
-                  <Briefcase size={18} />
-                </div>
+                <img
+                  src="/george.JPG"
+                  alt="האסטרטג ג'ורג'"
+                  className="w-9 h-9 rounded-full object-cover object-top shadow-md"
+                />
                 <div>
                   <h1 className="text-lg font-bold text-slate-900 leading-tight">האסטרטג ג'ורג'</h1>
                   <p className="text-[10px] text-slate-500">יועץ אסטרטגי שיווקי</p>
@@ -232,6 +241,7 @@ export default function App() {
                   </div>
                   <span className="text-[9px] font-bold text-red-600 uppercase tracking-tighter">כלים</span>
                 </button>
+
               </div>
             </div>
           </div>
