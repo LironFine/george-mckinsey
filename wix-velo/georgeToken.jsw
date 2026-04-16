@@ -1,0 +1,40 @@
+/**
+ * Wix Velo Backend — georgeToken.jsw
+ *
+ * הוראות התקנה:
+ * 1. ב-Wix Editor → Dev Mode → Backend → צור קובץ חדש בשם: georgeToken.jsw
+ * 2. הדבק את כל הקוד הזה לתוכו
+ * 3. ב-Wix Secrets Manager (Dev Tools → Secrets) צור secret בשם:
+ *    GEORGE_TOKEN_SECRET  עם הערך:
+ *    b4e7f2a91c3d65890ef2a4b7c1d3e6f9a2b5c8d1e4f7a0b3c6d9e2f5a8b1c4d7
+ */
+
+import { currentMember } from 'wix-members-backend';
+import { getSecret } from 'wix-secrets-backend';
+import { createHmac } from 'crypto';
+
+/**
+ * מייצר טוקן חתום עבור המנוי הנוכחי.
+ * נקרא מקוד הדף (client-side) לפני הצגת ה-iframe.
+ */
+export async function generateGeorgeToken() {
+  // ודא שהמשתמש מחובר
+  const member = await currentMember.getMember();
+  if (!member) {
+    throw new Error('לא מחובר');
+  }
+
+  const secret = await getSecret('GEORGE_TOKEN_SECRET');
+
+  const payload = Buffer.from(
+    JSON.stringify({
+      email: member.loginEmail,
+      memberId: member._id,
+      exp: Date.now() + 24 * 60 * 60 * 1000, // תוקף: 24 שעות
+    })
+  ).toString('base64url');
+
+  const signature = createHmac('sha256', secret).update(payload).digest('hex');
+
+  return `${payload}.${signature}`;
+}

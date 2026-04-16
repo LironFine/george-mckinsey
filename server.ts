@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
 import { createServer as createHttpServer } from "http";
 import { WebSocketServer, WebSocket as WsClient } from "ws";
+import crypto from "crypto";
 import { SYSTEM_PROMPT } from "./src/constants";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -24,6 +25,40 @@ async function startServer() {
     }
     return key.trim().replace(/["']/g, "");
   };
+
+  // ── Wix token validation ─────────────────────────────────────────────────────
+  // Token format: base64url(JSON payload) + "." + HMAC-SHA256 hex signature
+  // If WIX_TOKEN_SECRET is not set the endpoint returns valid:true (dev mode).
+  app.get("/api/validate-token", (req, res) => {
+    const secret = (process.env.WIX_TOKEN_SECRET || "").trim();
+    if (!secret) return res.json({ valid: true, dev: true });
+
+    const token = (req.query.token as string) || "";
+    if (!token) return res.json({ valid: false, reason: "no_token" });
+
+    try {
+      const dotIndex = token.lastIndexOf(".");
+      if (dotIndex === -1) return res.json({ valid: false, reason: "malformed" });
+
+      const payloadB64 = token.substring(0, dotIndex);
+      const signature  = token.substring(dotIndex + 1);
+
+      const expected = crypto
+        .createHmac("sha256", secret)
+        .update(payloadB64)
+        .digest("hex");
+
+      if (signature !== expected) return res.json({ valid: false, reason: "invalid_signature" });
+
+      const data = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf8"));
+      if (Date.now() > data.exp) return res.json({ valid: false, reason: "expired" });
+
+      return res.json({ valid: true, email: data.email });
+    } catch {
+      return res.json({ valid: false, reason: "error" });
+    }
+  });
+  // ─────────────────────────────────────────────────────────────────────────────
 
   // Health check endpoint
   app.get("/api/health", (req, res) => {

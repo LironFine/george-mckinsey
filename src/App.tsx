@@ -4,7 +4,7 @@ import { auth } from './lib/firebase';
 import Chat from './components/Chat';
 import Sidebar from './components/Sidebar';
 import AuthButton from './components/AuthButton';
-import { Briefcase, X, AlertTriangle } from 'lucide-react';
+import { Briefcase, X, AlertTriangle, Lock, ExternalLink } from 'lucide-react';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -71,11 +71,48 @@ export default function App() {
   const [externalInput, setExternalInput] = React.useState<string | undefined>(undefined);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [user, setUser] = useState<User | null>(null);
+  // null = checking, true = allowed, false = blocked
+  const [tokenValid, setTokenValid] = useState<boolean | null>(null);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, setUser);
     return unsub;
   }, []);
+
+  // ── Wix token validation ──────────────────────────────────────────────────
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('token');
+
+    if (token) {
+      // Validate token with server, then remove it from URL
+      fetch(`/api/validate-token?token=${encodeURIComponent(token)}`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.valid) {
+            sessionStorage.setItem('wix_access', 'true');
+            setTokenValid(true);
+            window.history.replaceState({}, '', window.location.pathname);
+          } else {
+            console.warn('[Auth] Wix token invalid:', data.reason);
+            setTokenValid(false);
+          }
+        })
+        .catch(() => setTokenValid(true)); // network error → allow (fail open)
+      return;
+    }
+
+    // No token in URL — check sessionStorage (same tab navigation)
+    const stored = sessionStorage.getItem('wix_access');
+    if (stored === 'true') { setTokenValid(true); return; }
+
+    // Check if server has no secret configured (dev/direct access allowed)
+    fetch('/api/validate-token')
+      .then((r) => r.json())
+      .then((data) => setTokenValid(data.dev === true ? true : false))
+      .catch(() => setTokenValid(true));
+  }, []);
+  // ─────────────────────────────────────────────────────────────────────────
 
   const handleSelectModel = (modelName: string) => {
     setExternalInput(`אשמח להתייעץ איתך בנושא מודל ${modelName}`);
@@ -83,6 +120,44 @@ export default function App() {
     // Reset after a short delay so it can be triggered again
     setTimeout(() => setExternalInput(undefined), 100);
   };
+
+  // Loading screen while validating token
+  if (tokenValid === null) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-slate-50">
+        <div className="flex flex-col items-center gap-3 text-slate-400">
+          <div className="w-8 h-8 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+          <span className="text-sm">טוען...</span>
+        </div>
+      </div>
+    );
+  }
+
+  // Subscription required screen
+  if (tokenValid === false) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-slate-50 p-6 rtl">
+        <div className="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-sm w-full p-8 text-center">
+          <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Lock size={28} className="text-blue-600" />
+          </div>
+          <h2 className="text-xl font-bold text-slate-900 mb-2">נדרש מנוי פעיל</h2>
+          <p className="text-slate-500 text-sm mb-6">
+            הגישה לאסטרטג השיווקי מיועדת למנויי הפרסומאי בלבד.
+          </p>
+          <a
+            href="https://www.pirsoomai.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-colors"
+          >
+            <span>למנוי ב-הפרסומאי</span>
+            <ExternalLink size={15} />
+          </a>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <ErrorBoundary>
