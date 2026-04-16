@@ -163,8 +163,7 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <div className={`flex flex-col bg-slate-50 overflow-hidden ${isInIframe ? 'min-h-screen' : 'h-screen'}`}
-           style={isInIframe ? { paddingTop: 'env(safe-area-inset-top, 0px)' } : {}}>
+      <div className="flex flex-col h-full bg-slate-50 overflow-hidden">
         {/* Header */}
         <header className="h-14 bg-white border-b border-slate-100 px-6 flex items-center justify-between shrink-0 z-50">
           <div className="flex items-center gap-2">

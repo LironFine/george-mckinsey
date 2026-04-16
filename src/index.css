@@ -8,10 +8,19 @@
 @layer base {
   html {
     direction: rtl;
+    height: 100%;
+    overflow: hidden;
   }
-  
+
   body {
+    height: 100%;
+    overflow: hidden;
     @apply bg-slate-50 text-slate-900 antialiased;
+  }
+
+  #root {
+    height: 100%;
+    overflow: hidden;
   }
 }
 

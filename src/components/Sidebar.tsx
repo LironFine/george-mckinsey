@@ -37,7 +37,7 @@ export default function Sidebar({ onSelectModel, isMobile }: { onSelectModel: (m
         </div>
       )}
 
-      <div className={`flex-1 space-y-1.5 ${isMobile ? 'overflow-y-auto pr-1' : 'overflow-hidden'}`}>
+      <div className={`flex-1 space-y-1.5 overflow-y-auto ${isMobile ? 'pr-1' : ''}`}>
         {models.map((model, index) => (
           <motion.button
             key={model.name}
