@@ -172,18 +172,16 @@ async function startServer() {
     const uid = (req.query.uid as string) || "";
     if (!uid) return res.status(400).json({ error: "missing uid" });
 
-    const terminal  = (process.env.CARDCOM_TERMINAL   || "").trim();
-    const userToken = (process.env.CARDCOM_USER_TOKEN || "").trim();
-    const appUrl    = (process.env.APP_URL || "https://your-app.up.railway.app").trim();
+    const terminal = (process.env.CARDCOM_TERMINAL || "").trim();
+    const appUrl   = (process.env.APP_URL || "https://your-app.up.railway.app").trim();
 
-    if (!terminal || !userToken) {
-      return res.status(500).json({ error: "Cardcom credentials not configured" });
+    if (!terminal) {
+      return res.status(500).json({ error: "CARDCOM_TERMINAL not configured" });
     }
 
     try {
       const params = new URLSearchParams({
         TerminalCode:       terminal,
-        UserTokenId:        userToken,
         APILevel:           "10",
         DocumentId:         uid,
         CoinID:             "1",
@@ -209,8 +207,8 @@ async function startServer() {
       });
 
       if (parts.ResponseCode !== "0") {
-        console.error("[Pack] Cardcom error:", parts);
-        return res.status(500).json({ error: parts.Description || "Cardcom error" });
+        console.error("[Pack] Cardcom error response:", text);
+        return res.status(500).json({ error: parts.Description || text || "Cardcom error" });
       }
 
       return res.json({
