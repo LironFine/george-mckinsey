@@ -1,4 +1,4 @@
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, increment } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 
 const DAILY_LIMIT = 100;
@@ -157,4 +157,50 @@ export async function incrementDemoVoiceUsage(uid: string): Promise<{ allowed: b
   usage.voiceCount += 1;
   await saveDemoUsage(uid, usage);
   return { allowed: true, remaining: DEMO_VOICE_LIMIT - usage.voiceCount };
+}
+
+// ── Purchased credits (Firestore — set by server after Cardcom payment) ───────
+// Pack: 300 text messages + 90 voice minutes for 50 ₪
+// Server adds credits; client can only decrease them (enforced by Firestore Rules).
+
+export async function getPurchasedCredits(uid: string): Promise<{ textMessages: number; voiceMinutes: number }> {
+  if (!db || !uid) return { textMessages: 0, voiceMinutes: 0 };
+  try {
+    const snap = await getDoc(doc(db, 'users', uid));
+    const data = snap.data() || {};
+    return {
+      textMessages: Math.max(0, Number(data.purchasedTextMessages) || 0),
+      voiceMinutes: Math.max(0, Number(data.purchasedVoiceMinutes) || 0),
+    };
+  } catch {
+    return { textMessages: 0, voiceMinutes: 0 };
+  }
+}
+
+/** Deduct 1 purchased text message. Returns true if credit was available. */
+export async function deductPurchasedText(uid: string): Promise<boolean> {
+  if (!db || !uid) return false;
+  try {
+    const credits = await getPurchasedCredits(uid);
+    if (credits.textMessages <= 0) return false;
+    await updateDoc(doc(db, 'users', uid), {
+      purchasedTextMessages: increment(-1),
+    });
+    return true;
+  } catch (err) {
+    console.error('[Credits] deductPurchasedText failed:', err);
+    return false;
+  }
+}
+
+/** Deduct voice minutes from purchased credits. */
+export async function deductPurchasedVoice(uid: string, minutesUsed: number): Promise<void> {
+  if (!db || !uid || minutesUsed <= 0) return;
+  try {
+    await updateDoc(doc(db, 'users', uid), {
+      purchasedVoiceMinutes: increment(-minutesUsed),
+    });
+  } catch (err) {
+    console.error('[Credits] deductPurchasedVoice failed:', err);
+  }
 }

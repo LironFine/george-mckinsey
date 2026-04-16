@@ -8,7 +8,7 @@ import { Message } from '../types';
 import { sendMessageToGemini } from '../services/gemini';
 import { INITIAL_MESSAGE } from '../constants';
 import { voiceService } from '../services/voiceService';
-import { checkAndIncrementUsage, checkVoiceMinutesAvailable, recordVoiceUsage, setVisitorId, incrementDemoTextUsage, incrementDemoVoiceUsage } from '../services/usageService';
+import { checkAndIncrementUsage, checkVoiceMinutesAvailable, recordVoiceUsage, setVisitorId, incrementDemoTextUsage, incrementDemoVoiceUsage, getPurchasedCredits, deductPurchasedText, deductPurchasedVoice } from '../services/usageService';
 import { saveSession, loadSession } from '../services/historyService';
 
 export default function Chat({ externalInput, user, isDemo }: { externalInput?: string; user?: FirebaseUser | null; isDemo?: boolean }) {
@@ -30,6 +30,9 @@ export default function Chat({ externalInput, user, isDemo }: { externalInput?: 
   const [cloudStatus, setCloudStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [demoExhausted, setDemoExhausted] = useState(false);
   const [demoWarning, setDemoWarning] = useState<string | null>(null);
+  const [showPurchaseCard, setShowPurchaseCard] = useState(false);
+  const [isPurchasePending, setIsPurchasePending] = useState(false);
+  const usingPaidVoiceRef = useRef(false);
   const voiceStartTimeRef = useRef<number>(0);
   // Always-fresh messages ref — updated synchronously every render so voice
   // callbacks (onClose) always read the latest messages, even before React re-renders
@@ -115,6 +118,19 @@ export default function Chat({ externalInput, user, isDemo }: { externalInput?: 
     return () => clearTimeout(t);
   }, []); // eslint-disable-line
 
+  // After returning from Cardcom payment (?purchase=success) — hide card & clean URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('purchase') === 'success') {
+      setShowPurchaseCard(false);
+      // Remove the ?purchase=success param while keeping any ?token= param
+      const newParams = new URLSearchParams(window.location.search);
+      newParams.delete('purchase');
+      const newSearch = newParams.toString();
+      window.history.replaceState({}, '', newSearch ? `?${newSearch}` : window.location.pathname);
+    }
+  }, []);
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -141,14 +157,32 @@ export default function Chat({ externalInput, user, isDemo }: { externalInput?: 
       } else {
         const { allowed, remaining } = await checkAndIncrementUsage();
         if (!allowed) {
-          const limitMessage: Message = {
-            id: Date.now().toString(),
-            role: 'assistant',
-            content: 'הגעת למכסת ההודעות היומית שלך (100 הודעות). ג\'ורג\' צריך לנוח קצת כדי להישאר חד. נחזור לדבר מחר!',
-            timestamp: Date.now(),
-          };
-          setMessages((prev) => [...prev, limitMessage]);
-          return;
+          // Check for purchased text credits before blocking
+          if (user) {
+            const used = await deductPurchasedText(user.uid);
+            if (used) {
+              // Purchased credit deducted — allow this message
+            } else {
+              setShowPurchaseCard(true);
+              const limitMessage: Message = {
+                id: Date.now().toString(),
+                role: 'assistant',
+                content: 'הגעת למכסת ההודעות היומית שלך (100 הודעות). ניתן לרכוש חבילת שימוש נוספת בכפתור למטה.',
+                timestamp: Date.now(),
+              };
+              setMessages((prev) => [...prev, limitMessage]);
+              return;
+            }
+          } else {
+            const limitMessage: Message = {
+              id: Date.now().toString(),
+              role: 'assistant',
+              content: 'הגעת למכסת ההודעות היומית שלך (100 הודעות). ג\'ורג\' צריך לנוח קצת כדי להישאר חד. נחזור לדבר מחר!',
+              timestamp: Date.now(),
+            };
+            setMessages((prev) => [...prev, limitMessage]);
+            return;
+          }
         }
 
         if (remaining === 10) {
@@ -561,19 +595,29 @@ ${voiceUserLines.join('\n')}
         return;
       }
 
-      // Check monthly voice minutes limit (90 min ≈ 8 ₪)
+      // Check monthly voice minutes limit (90 min free)
       const { allowed, remainingMinutes, resetDays } = await checkVoiceMinutesAvailable();
       if (!allowed) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: Date.now().toString(),
-            role: 'assistant',
-            content: `נגמרו לך דקות השיחה הקולית החודשיות (90 דקות). המכסה תתחדש בעוד ${resetDays} ימים. ניתן להמשיך בצ'אט הטקסטואלי ללא הגבלה.`,
-            timestamp: Date.now(),
-          } as Message,
-        ]);
-        return;
+        // Check for purchased voice credits before blocking
+        const hasPaidCredits = user
+          ? (await getPurchasedCredits(user.uid)).voiceMinutes > 0
+          : false;
+
+        if (hasPaidCredits) {
+          usingPaidVoiceRef.current = true; // flag: deduct from purchased credits on close
+        } else {
+          setShowPurchaseCard(true);
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: Date.now().toString(),
+              role: 'assistant',
+              content: `נגמרו לך דקות השיחה הקולית החודשיות (90 דקות). המכסה תתחדש בעוד ${resetDays} ימים. ניתן לרכוש חבילת שימוש נוספת בכפתור למטה.`,
+              timestamp: Date.now(),
+            } as Message,
+          ]);
+          return;
+        }
       }
 
       // Warn if fewer than 10 minutes remain
@@ -618,6 +662,12 @@ ${voiceUserLines.join('\n')}
         },
         onClose: () => {
           recordVoiceUsage(voiceStartTimeRef.current);
+          // If session used purchased credits, deduct the actual minutes used
+          if (usingPaidVoiceRef.current && user && voiceStartTimeRef.current) {
+            const minsUsed = Math.ceil((Date.now() - voiceStartTimeRef.current) / 60000);
+            deductPurchasedVoice(user.uid, minsUsed);
+            usingPaidVoiceRef.current = false;
+          }
           setIsVoiceActive(false);
           // Immediate cloud-save when voice ends (bypass the 2 s debounce)
           if (user) saveSession(user.uid, messagesRef.current, clientName);
@@ -813,6 +863,43 @@ ${voiceUserLines.join('\n')}
             <Send size={20} />
           </button>
         </div>
+
+        {/* Purchase card — shown when free quota is exhausted */}
+        {showPurchaseCard && !isDemo && user && (
+          <div className="mx-auto w-full max-w-lg mb-2 p-3 bg-amber-50 border border-amber-200 rounded-2xl text-right flex items-center justify-between gap-3">
+            <div className="flex-1">
+              <p className="text-xs font-bold text-amber-800">נגמרה המכסה החינמית</p>
+              <p className="text-[10px] text-amber-700">300 הודעות + 90 דקות קול — ב-50 ₪</p>
+            </div>
+            <button
+              disabled={isPurchasePending}
+              onClick={async () => {
+                setIsPurchasePending(true);
+                try {
+                  const resp = await fetch(`/api/create-pack?uid=${user.uid}`);
+                  const data = await resp.json();
+                  if (data.url) {
+                    window.open(data.url, '_blank');
+                  } else {
+                    alert('שגיאה ביצירת קישור תשלום: ' + (data.error || 'נסה שוב'));
+                  }
+                } catch {
+                  alert('שגיאת תקשורת — נסה שוב');
+                } finally {
+                  setIsPurchasePending(false);
+                }
+              }}
+              className="shrink-0 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-colors whitespace-nowrap"
+            >
+              {isPurchasePending ? '...' : 'רכוש ב-50 ₪ →'}
+            </button>
+            <button
+              onClick={() => setShowPurchaseCard(false)}
+              className="shrink-0 text-amber-400 hover:text-amber-600 text-xs"
+              title="סגור"
+            >✕</button>
+          </div>
+        )}
 
         {/* Action Buttons - Moved below input */}
         <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-1.5 sm:gap-2 max-w-4xl mx-auto" role="group" aria-label="פעולות מהירות">

@@ -7,6 +7,22 @@ import { createServer as createHttpServer } from "http";
 import { WebSocketServer, WebSocket as WsClient } from "ws";
 import crypto from "crypto";
 import { SYSTEM_PROMPT } from "./src/constants";
+import admin from "firebase-admin";
+
+// ── Firebase Admin SDK (server-side, bypasses Firestore Rules) ───────────────
+let adminDb: admin.firestore.Firestore | null = null;
+try {
+  const saJson = process.env.FIREBASE_SERVICE_ACCOUNT;
+  if (saJson && !admin.apps.length) {
+    const sa = JSON.parse(Buffer.from(saJson, "base64").toString("utf8"));
+    admin.initializeApp({ credential: admin.credential.cert(sa) });
+    adminDb = admin.firestore();
+    console.log("[Admin] Firebase Admin SDK initialized");
+  }
+} catch (e: any) {
+  console.warn("[Admin] Firebase Admin SDK init failed:", e.message);
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -148,6 +164,99 @@ async function startServer() {
       });
     }
   });
+
+  // ── Voice/Text pack purchase — Cardcom ──────────────────────────────────────
+
+  // GET /api/create-pack?uid=xxx  → returns { url: "https://secure.cardcom.solutions/..." }
+  app.get("/api/create-pack", async (req, res) => {
+    const uid = (req.query.uid as string) || "";
+    if (!uid) return res.status(400).json({ error: "missing uid" });
+
+    const terminal    = (process.env.CARDCOM_TERMINAL    || "").trim();
+    const apiName     = (process.env.CARDCOM_API_NAME    || "").trim();
+    const apiPassword = (process.env.CARDCOM_API_PASSWORD || "").trim();
+    const appUrl      = (process.env.APP_URL || "https://your-app.up.railway.app").trim();
+
+    if (!terminal || !apiName || !apiPassword) {
+      return res.status(500).json({ error: "Cardcom credentials not configured" });
+    }
+
+    try {
+      const params = new URLSearchParams({
+        TerminalCode:       terminal,
+        APILevel:           "10",
+        APIName:            apiName,
+        APIPassword:        apiPassword,
+        DocumentId:         uid,
+        CoinID:             "1",
+        SumToBill:          "50",
+        ProductName:        "חבילת שימוש — 300 הודעות + 90 דקות קול",
+        ProductQuantity:    "1",
+        ProductPrice:       "50",
+        IPNUrl:             `${appUrl}/api/cardcom-ipn`,
+        SuccessRedirectUrl: `${appUrl}/?purchase=success`,
+        ErrorRedirectUrl:   `${appUrl}/?purchase=failed`,
+        Language:           "he",
+      });
+
+      const resp = await fetch(
+        "https://secure.cardcom.solutions/interface/ChargeAccordingToProductList.aspx",
+        { method: "POST", body: params }
+      );
+      const text = await resp.text();
+      const parts: Record<string, string> = {};
+      text.split(";").forEach((s) => {
+        const i = s.indexOf("=");
+        if (i > -1) parts[s.substring(0, i)] = s.substring(i + 1);
+      });
+
+      if (parts.ResponseCode !== "0") {
+        console.error("[Pack] Cardcom error:", parts);
+        return res.status(500).json({ error: parts.Description || "Cardcom error" });
+      }
+
+      return res.json({
+        url: `https://secure.cardcom.solutions/Interface/LowProfile.aspx?LowProfileCode=${parts.LowProfileCode}`,
+      });
+    } catch (err: any) {
+      console.error("[Pack] create-pack error:", err.message);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST/GET /api/cardcom-ipn  — Cardcom calls this after successful payment
+  const handleCardcomIpn = async (req: express.Request, res: express.Response) => {
+    const body = { ...req.query, ...req.body } as Record<string, string>;
+    const { RetCode, DocumentId, SumToBill, TerminalCode } = body;
+
+    console.log("[IPN] Cardcom IPN received:", { RetCode, DocumentId, SumToBill });
+
+    if (String(RetCode) !== "0")           return res.send("FAILED");
+    if (!DocumentId)                       return res.send("NO_UID");
+    if (Number(SumToBill) < 50)            return res.send("AMOUNT_TOO_LOW");
+    if (TerminalCode !== (process.env.CARDCOM_TERMINAL || "").trim())
+                                           return res.send("WRONG_TERMINAL");
+    if (!adminDb)                          return res.status(500).send("DB_NOT_INITIALIZED");
+
+    try {
+      await adminDb.doc(`users/${DocumentId}`).set(
+        {
+          purchasedTextMessages: admin.firestore.FieldValue.increment(300),
+          purchasedVoiceMinutes: admin.firestore.FieldValue.increment(90),
+        },
+        { merge: true }
+      );
+      console.log(`[IPN] Pack added → ${DocumentId}: +300 text, +90 voice-min`);
+      return res.send("OK");
+    } catch (err: any) {
+      console.error("[IPN] Firestore error:", err.message);
+      return res.status(500).send("DB_ERROR");
+    }
+  };
+
+  app.post("/api/cardcom-ipn", handleCardcomIpn);
+  app.get("/api/cardcom-ipn", handleCardcomIpn);
+  // ─────────────────────────────────────────────────────────────────────────────
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
