@@ -105,6 +105,14 @@ export default function Chat({ externalInput, user }: { externalInput?: string; 
     }
   }, [externalInput]);
 
+  // Auto-start voice when opened via mic button from iframe (?autovoice=1)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('autovoice') !== '1') return;
+    const t = setTimeout(() => { toggleVoice(); }, 800);
+    return () => clearTimeout(t);
+  }, []); // eslint-disable-line
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -704,10 +712,19 @@ ${voiceUserLines.join('\n')}
             rows={2}
           />
           <button
-            onClick={toggleVoice}
+            onClick={() => {
+              // In iframe: open new window with autovoice flag instead of starting locally
+              if (isInIframe && !isVoiceActive) {
+                const url = new URL(window.location.href);
+                url.searchParams.set('autovoice', '1');
+                window.open(url.toString(), '_blank');
+                return;
+              }
+              toggleVoice();
+            }}
             className={`p-3 rounded-xl transition-all shadow-lg ${
-              isVoiceActive 
-                ? 'bg-red-500 text-white shadow-red-200 animate-pulse' 
+              isVoiceActive
+                ? 'bg-red-500 text-white shadow-red-200 animate-pulse'
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200 shadow-slate-200'
             }`}
             title={isVoiceActive ? "עצור שיחה קולית" : "התחל שיחה קולית"}
@@ -767,18 +784,6 @@ ${voiceUserLines.join('\n')}
             <span className="truncate">פגישה עם לירון פיין</span>
             <ExternalLink size={8} className="opacity-70 sm:w-[10px] sm:h-[10px]" />
           </a>
-          {isInIframe && (
-            <a
-              href={window.location.href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center justify-center gap-1.5 px-2 py-1.5 sm:px-4 sm:py-2 bg-amber-50 text-amber-700 rounded-full text-[9px] sm:text-[11px] font-medium hover:bg-amber-100 transition-colors border border-amber-200"
-            >
-              <Mic size={12} className="sm:w-[14px] sm:h-[14px]" />
-              <span className="truncate">שיחה קולית בחלון נפרד</span>
-              <ExternalLink size={8} className="opacity-70 sm:w-[10px] sm:h-[10px]" />
-            </a>
-          )}
         </div>
 
         <div className="text-center mt-3 text-[10px] text-slate-400 flex items-center justify-center gap-2">
