@@ -111,7 +111,7 @@ export default function Chat({ externalInput, user, isDemo }: { externalInput?: 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('autovoice') !== '1') return;
-    const t = setTimeout(() => { toggleVoice(); }, 800);
+    const t = setTimeout(() => { toggleVoice(); }, 2500);
     return () => clearTimeout(t);
   }, []); // eslint-disable-line
 
@@ -593,7 +593,7 @@ ${voiceUserLines.join('\n')}
       setIsVoiceActive(true);
 
       await voiceService.start({
-        history: messages,
+        history: messagesRef.current, // always fresh — avoids stale closure in autovoice
         onTranscription: (text, role) => {
           const voiceMsg: Message = {
             id: `voice-${Date.now()}-${Math.random().toString(36).slice(2)}`,
