@@ -33,18 +33,13 @@ async function startServer() {
 
   app.use(express.json());
 
-  // Helper to get the API key safely and cleaned
   const getApiKey = () => {
     const key = process.env.GEMINI_API_KEY;
-    if (!key || key === "undefined" || key === "null" || key === "") {
-      return null;
-    }
+    if (!key || key === "undefined" || key === "null" || key === "") return null;
     return key.trim().replace(/["']/g, "");
   };
 
   // ── Wix token validation ─────────────────────────────────────────────────────
-  // Token format: base64url(JSON payload) + "." + HMAC-SHA256 hex signature
-  // If WIX_TOKEN_SECRET is not set the endpoint returns valid:true (dev mode).
   app.get("/api/validate-token", (req, res) => {
     const secret = (process.env.WIX_TOKEN_SECRET || "").trim();
     if (!secret) return res.json({ valid: true, dev: true });
@@ -80,12 +75,10 @@ async function startServer() {
   });
   // ─────────────────────────────────────────────────────────────────────────────
 
-  // Health check endpoint
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
 
-  // Diagnostic: list models that support Live API (bidiGenerateContent)
   app.get("/api/live-models", async (req, res) => {
     const apiKey = getApiKey();
     if (!apiKey) return res.status(500).json({ error: "No API key" });
@@ -103,18 +96,15 @@ async function startServer() {
     }
   });
 
-  // API endpoint for text chat — uses direct REST fetch, no SDK
   app.post("/api/chat", async (req, res) => {
     console.log(`Chat request received: ${JSON.stringify(req.body).substring(0, 100)}...`);
     try {
       const { messages } = req.body;
-
       if (!messages || !Array.isArray(messages)) {
         return res.status(400).json({ error: "פורמט הודעות לא תקין" });
       }
 
       const apiKey = getApiKey();
-
       if (!apiKey) {
         return res.status(500).json({
           error: "מפתח ה-API חסר בשרת.",
@@ -126,14 +116,9 @@ async function startServer() {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
       const body = {
-        system_instruction: {
-          parts: [{ text: SYSTEM_PROMPT }],
-        },
+        system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
         contents: messages,
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 2048,
-        },
+        generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
       };
 
       const geminiResponse = await fetch(url, {
@@ -145,8 +130,7 @@ async function startServer() {
       if (!geminiResponse.ok) {
         const errBody = await geminiResponse.json().catch(() => ({}));
         console.error("Gemini API error:", geminiResponse.status, errBody);
-        const msg =
-          errBody?.error?.message || "שגיאה לא ידועה מ-Gemini API";
+        const msg = errBody?.error?.message || "שגיאה לא ידועה מ-Gemini API";
         return res.status(geminiResponse.status).json({ error: msg });
       }
 
@@ -158,68 +142,34 @@ async function startServer() {
       return res.json({ text });
     } catch (error: any) {
       console.error("Backend chat error:", error);
-      res.status(500).json({
-        error: "חלה שגיאה בתקשורת עם Gemini",
-        details: error.message,
-      });
+      res.status(500).json({ error: "חלה שגיאה בתקשורת עם Gemini", details: error.message });
     }
   });
 
   // ── Voice/Text pack purchase — Cardcom ──────────────────────────────────────
 
   // GET /api/create-pack?uid=xxx  → returns { url: "https://secure.cardcom.solutions/..." }
+  // Uses a static Cardcom payment link (CARDCOM_PACK_URL) with ReturnValue=uid appended.
   app.get("/api/create-pack", async (req, res) => {
     const uid = (req.query.uid as string) || "";
     if (!uid) return res.status(400).json({ error: "missing uid" });
 
-    const terminal    = (process.env.CARDCOM_TERMINAL    || "").trim();
-    const apiName     = (process.env.CARDCOM_API_NAME    || "").trim();
-    const apiPassword = (process.env.CARDCOM_API_PASSWORD || "").trim();
-    const appUrl      = (process.env.APP_URL || "https://your-app.up.railway.app").trim();
+    const packUrl = (process.env.CARDCOM_PACK_URL || "").trim();
+    const appUrl  = (process.env.APP_URL || "").trim();
 
-    if (!terminal) {
-      return res.status(500).json({ error: "CARDCOM_TERMINAL not configured" });
+    if (!packUrl) {
+      return res.status(500).json({ error: "CARDCOM_PACK_URL not configured" });
     }
 
     try {
-      const params = new URLSearchParams({
-        TerminalCode:       terminal,
-        APIName:            apiName,
-        APIPassword:        apiPassword,
-        APILevel:           "10",
-        ReturnValue:        uid,            // our user id — comes back in IPN
-        CoinID:             "1",
-        SumToBill:          "50",
-        ProductName1:       "Pack 300+90",  // ASCII to avoid encoding issues
-        Quantity1:          "1",
-        UnitPrice1:         "50",
-        IPNUrl:             `${appUrl}/api/cardcom-ipn`,
-        SuccessRedirectUrl: `${appUrl}/?purchase=success`,
-        ErrorRedirectUrl:   `${appUrl}/?purchase=failed`,
-        Language:           "he",
-      });
-
-      console.log("[Pack] Sending to Cardcom:", Object.fromEntries(params));
-
-      const resp = await fetch(
-        "https://secure.cardcom.solutions/interface/ChargeAccordingToProductList.aspx",
-        { method: "POST", body: params }
-      );
-      const text = await resp.text();
-      const parts: Record<string, string> = {};
-      text.split(";").forEach((s) => {
-        const i = s.indexOf("=");
-        if (i > -1) parts[s.substring(0, i)] = s.substring(i + 1);
-      });
-
-      if (parts.ResponseCode !== "0") {
-        console.error("[Pack] Cardcom error response:", text);
-        return res.status(500).json({ error: parts.Description || text || "Cardcom error" });
+      const url = new URL(packUrl);
+      url.searchParams.set("ReturnValue", uid);
+      if (appUrl) {
+        url.searchParams.set("SuccessRedirectUrl", `${appUrl}/?purchase=success`);
+        url.searchParams.set("ErrorRedirectUrl",   `${appUrl}/?purchase=failed`);
       }
-
-      return res.json({
-        url: `https://secure.cardcom.solutions/Interface/LowProfile.aspx?LowProfileCode=${parts.LowProfileCode}`,
-      });
+      console.log("[Pack] Redirecting to Cardcom:", url.toString());
+      return res.json({ url: url.toString() });
     } catch (err: any) {
       console.error("[Pack] create-pack error:", err.message);
       return res.status(500).json({ error: err.message });
@@ -230,7 +180,7 @@ async function startServer() {
   const handleCardcomIpn = async (req: express.Request, res: express.Response) => {
     const body = { ...req.query, ...req.body } as Record<string, string>;
     const { RetCode, ReturnValue, SumToBill, TerminalCode } = body;
-    const uid = ReturnValue || body.DocumentId || ""; // support both field names
+    const uid = ReturnValue || body.DocumentId || "";
 
     console.log("[IPN] Cardcom IPN received:", { RetCode, uid, SumToBill });
 
@@ -261,7 +211,6 @@ async function startServer() {
   app.get("/api/cardcom-ipn", handleCardcomIpn);
   // ─────────────────────────────────────────────────────────────────────────────
 
-  // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     try {
       const vite = await createViteServer({
@@ -281,11 +230,8 @@ async function startServer() {
     });
   }
 
-  // Create HTTP server (needed for WebSocket upgrade)
   const server = createHttpServer(app);
 
-  // WebSocket proxy — connects frontend to Gemini Live API
-  // API key stays on the server; browser only sends/receives audio via our WS
   const wss = new WebSocketServer({ server, path: "/api/voice-ws" });
 
   wss.on("connection", (ws) => {
@@ -298,7 +244,6 @@ async function startServer() {
       return;
     }
 
-    // Connect directly to Gemini Live WebSocket — no SDK, no compatibility issues
     const geminiUrl =
       `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${apiKey}`;
 
@@ -328,7 +273,6 @@ async function startServer() {
     geminiWs.on("message", (data) => {
       try {
         const msg = JSON.parse(data.toString());
-        // setupComplete signals Gemini is ready
         if (msg.setupComplete !== undefined) {
           console.log("Gemini Live setup complete");
           if (ws.readyState === ws.OPEN) {
@@ -336,7 +280,6 @@ async function startServer() {
           }
           return;
         }
-        // Forward all other messages to the browser
         if (ws.readyState === ws.OPEN) {
           ws.send(JSON.stringify({ type: "message", data: msg }));
         }
@@ -357,7 +300,6 @@ async function startServer() {
       if (ws.readyState === ws.OPEN) ws.close();
     });
 
-    // Forward messages from browser → Gemini
     ws.on("message", (data) => {
       try {
         const msg = JSON.parse(data.toString());
