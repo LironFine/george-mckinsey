@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { User as FirebaseUser } from 'firebase/auth';
+import { doc, updateDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { motion, AnimatePresence } from 'motion/react';
 import { Send, User, Bot, Loader2, Paperclip, Sparkles, FileText, LayoutList, Calendar, ExternalLink, RefreshCw, ClipboardList, Mic, MicOff, Volume2, Mic2, Cloud } from 'lucide-react';
 import Markdown from 'react-markdown';
@@ -11,7 +13,7 @@ import { voiceService } from '../services/voiceService';
 import { checkAndIncrementMonthlyText, checkVoiceMinutesAvailableForUser, recordVoiceUsageForUser, setVisitorId, incrementDemoTextUsage, incrementDemoVoiceUsage, getPurchasedCredits, deductPurchasedText, deductPurchasedVoice } from '../services/usageService';
 import { saveSession, loadSession } from '../services/historyService';
 
-export default function Chat({ externalInput, user, isDemo }: { externalInput?: string; user?: FirebaseUser | null; isDemo?: boolean }) {
+export default function Chat({ externalInput, user, isDemo, subscription }: { externalInput?: string; user?: FirebaseUser | null; isDemo?: boolean; subscription?: any }) {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -516,13 +518,48 @@ ${voiceUserLines.join('\n')}
     }
   };
 
+  const handleSubscribe = async () => {
+    if (!user) return;
+    try {
+      const r = await fetch(`/api/create-subscription?uid=${user.uid}`);
+      const { url, error } = await r.json();
+      if (url) window.open(url, '_blank');
+      else alert('שגיאה: ' + (error || 'נסה שוב'));
+    } catch { alert('שגיאת תקשורת — נסה שוב'); }
+  };
+
+  const handleCancelSubscription = async () => {
+    if (!user || !subscription) return;
+    if (!confirm('לבטל את המנוי?\nהגישה תיפסק בסוף התקופה הנוכחית.')) return;
+    try {
+      await fetch('/api/cancel-subscription', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uid: user.uid, dealNumber: subscription.cardcomDealNumber }),
+      });
+      // Client updates Firestore (Rules allow setting status to non-'active' value)
+      await updateDoc(doc(db, 'users', user.uid), {
+        'subscription.status': 'cancelled',
+        'subscription.cancelledAt': Date.now(),
+      });
+      const expiry = subscription.currentPeriodEnd
+        ? new Date(subscription.currentPeriodEnd).toLocaleDateString('he-IL')
+        : 'סוף החודש';
+      alert(`המנוי בוטל. הגישה תהיה פעילה עד ${expiry}`);
+      window.location.reload();
+    } catch (err) {
+      console.error('[Cancel]', err);
+      alert('שגיאה בביטול — נסה שוב');
+    }
+  };
+
   const triggerDemoEnd = async () => {
     setDemoExhausted(true);
     setDemoWarning(null);
     const endMessage: Message = {
       id: 'demo-end-' + Date.now(),
       role: 'assistant',
-      content: `הגעת לסוף גרסת הניסיון החינמית של ג'ורג'.\n\nכדי להמשיך ליהנות מכל הכלים — שיחות קוליות, תיקי לקוח, בריפים ועוד — הירשם כמנוי:\n\n**[הירשם כמנוי](https://www.pirsoomai.com/pricing-plans/list)**`,
+      content: `הגעת לסוף גרסת הניסיון החינמית של ג'ורג'.\n\nכדי להמשיך ליהנות מכל הכלים — שיחות קוליות, תיקי לקוח, בריפים ועוד — רכוש מנוי חודשי ב-99 ₪.`,
       timestamp: Date.now(),
     };
     setMessages((prev) => [...prev, endMessage]);
@@ -535,7 +572,7 @@ ${voiceUserLines.join('\n')}
         timestamp: Date.now(),
       };
       const summary = await sendMessageToGemini([...messages, summaryPrompt]);
-      const content = `--- גרסת ניסיון חינמית של ג'ורג' ---\nהשיחה הזו נוצרה בגרסת הניסיון החינמית.\nכדי להמשיך ליהנות מכל הכלים, הירשם כמנוי:\nhttps://www.pirsoomai.com/pricing-plans/list\n---\n\n${summary}`;
+      const content = `--- גרסת ניסיון חינמית של ג'ורג' ---\nהשיחה הזו נוצרה בגרסת הניסיון החינמית.\n---\n\n${summary}`;
       const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -574,9 +611,19 @@ ${voiceUserLines.join('\n')}
   };
 
   const toggleVoice = async () => {
-    if (isDemo) {
-      alert('שיחה קולית זמינה למנויים בלבד.\nהירשם כמנוי כדי ליהנות מכל הכלים.');
-      return;
+    // Demo users get 2 voice sessions (tracked in Firestore demo_usage)
+    if (isDemo && user && !isVoiceActive) {
+      const { allowed } = await incrementDemoVoiceUsage(user.uid);
+      if (!allowed) {
+        setMessages((prev) => [...prev, {
+          id: Date.now().toString(),
+          role: 'assistant',
+          content: 'ניצלת את 2 השיחות הקוליות בגרסת הניסיון.\nכדי להמשיך ליהנות מהשיחות הקוליות — רכוש מנוי חודשי ב-99 ₪.',
+          timestamp: Date.now(),
+        } as Message]);
+        return;
+      }
+      // allowed — fall through to start voice normally
     }
 
     if (isVoiceActive) {
@@ -598,9 +645,10 @@ ${voiceUserLines.join('\n')}
       }
 
       // Check monthly voice minutes limit (Firestore-based, shared across apps)
-      const { allowed, remainingMinutes, resetDays } = user
+      // Demo users already passed the demo voice check above — skip monthly check for them
+      const { allowed, remainingMinutes, resetDays } = (user && !isDemo)
         ? await checkVoiceMinutesAvailableForUser(user.uid)
-        : { allowed: false, remainingMinutes: 0, resetDays: 0 };
+        : { allowed: true, remainingMinutes: 999, resetDays: 30 };
       if (!allowed) {
         // Check for purchased voice credits before blocking
         const hasPaidCredits = user
@@ -793,21 +841,19 @@ ${voiceUserLines.join('\n')}
       <div className="p-2 sm:p-4 bg-white border-t border-slate-100">
         {demoWarning && (
           <div className="max-w-4xl mx-auto mb-2 px-4 py-2 bg-amber-50 border border-amber-200 rounded-xl text-center text-xs text-amber-700 font-medium">
-            {demoWarning} — <a href="https://www.pirsoomai.com/pricing-plans/list" target="_blank" rel="noopener noreferrer" className="underline font-bold">הירשם כמנוי</a>
+            {demoWarning} — <button onClick={handleSubscribe} className="underline font-bold">רכוש מנוי</button>
           </div>
         )}
 
         {demoExhausted ? (
           <div className="max-w-4xl mx-auto text-center py-6">
             <p className="text-slate-600 mb-4 text-sm">גרסת הניסיון החינמית הסתיימה. הסיכום הורד למחשבך.</p>
-            <a
-              href="https://www.pirsoomai.com/pricing-plans/list"
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              onClick={handleSubscribe}
               className="inline-block px-8 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-colors shadow-lg"
             >
-              הירשם כמנוי כדי להמשיך
-            </a>
+              רכוש מנוי כדי להמשיך
+            </button>
           </div>
         ) : (<>
 
@@ -949,6 +995,14 @@ ${voiceUserLines.join('\n')}
             <span className="truncate">פגישה עם לירון פיין</span>
             <ExternalLink size={8} className="opacity-70 sm:w-[10px] sm:h-[10px]" />
           </a>
+          {subscription?.status === 'active' && (
+            <button
+              onClick={handleCancelSubscription}
+              className="flex items-center justify-center gap-1.5 px-2 py-1.5 sm:px-4 sm:py-2 bg-slate-50 text-slate-400 rounded-full text-[9px] sm:text-[11px] font-medium hover:bg-red-50 hover:text-red-500 transition-colors border border-slate-200"
+            >
+              <span className="truncate">ביטול מנוי</span>
+            </button>
+          )}
         </div>
         </>)}
 

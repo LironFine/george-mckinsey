@@ -1,10 +1,11 @@
 import React, { useState, useEffect, Component, ErrorInfo, ReactNode } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { auth } from './lib/firebase';
+import { doc, getDoc } from 'firebase/firestore';
+import { auth, db } from './lib/firebase';
 import Chat from './components/Chat';
 import Sidebar from './components/Sidebar';
 import AuthButton from './components/AuthButton';
-import { Briefcase, X, AlertTriangle, Lock, ExternalLink, Sparkles } from 'lucide-react';
+import { Briefcase, X, AlertTriangle, ExternalLink, Sparkles } from 'lucide-react';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -67,54 +68,51 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   }
 }
 
+type SubStatus = 'loading' | 'active' | 'trial' | 'blocked';
+
 export default function App() {
   const [externalInput, setExternalInput] = React.useState<string | undefined>(undefined);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [user, setUser] = useState<User | null>(null);
-  const [tokenValid, setTokenValid] = useState<boolean | null>(null);
-  const [isDemo, setIsDemo] = useState(false);
+  const [subStatus, setSubStatus] = useState<SubStatus>('loading');
+  const [subscription, setSubscription] = useState<any>(null);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, setUser);
     return unsub;
   }, []);
 
-  // ── Wix token validation ──────────────────────────────────────────────────
+  // ── Subscription check — reads from Firestore after Google sign-in ────────
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const token = params.get('token');
-
-    if (token) {
-      fetch(`/api/validate-token?token=${encodeURIComponent(token)}`)
-        .then((r) => r.json())
-        .then((data) => {
-          if (data.valid) {
-            setTokenValid(true);
-            setIsDemo(false);
-          } else {
-            console.warn('[Auth] Wix token invalid:', data.reason);
-            setTokenValid(false);
-          }
-        })
-        .catch(() => setTokenValid(true));
+    if (!user) {
+      setSubStatus('loading');
       return;
     }
+    (async () => {
+      try {
+        const [userSnap, demoSnap] = await Promise.all([
+          getDoc(doc(db, 'users', user.uid)),
+          getDoc(doc(db, 'demo_usage', user.uid)),
+        ]);
+        const sub = (userSnap.data() || {}).subscription;
+        const demo = demoSnap.data() || { textCount: 0, voiceCount: 0 };
 
-    fetch('/api/validate-token')
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.dev === true) {
-          setTokenValid(true);
-          setIsDemo(false);
-        } else if (data.demo === true) {
-          setTokenValid(true);
-          setIsDemo(true);
+        if (sub?.status === 'active' && sub.currentPeriodEnd > Date.now()) {
+          setSubscription(sub);
+          setSubStatus('active');
+        } else if (sub?.status === 'cancelled' || sub?.status === 'expired') {
+          setSubStatus('blocked');
+        } else if ((demo.textCount || 0) < 20 && (demo.voiceCount || 0) < 2) {
+          setSubStatus('trial');
         } else {
-          setTokenValid(false);
+          setSubStatus('blocked');
         }
-      })
-      .catch(() => setTokenValid(true));
-  }, []);
+      } catch (err) {
+        console.error('[Auth] Subscription check failed:', err);
+        setSubStatus('trial'); // fail-open: allow trial if check fails
+      }
+    })();
+  }, [user?.uid]);
   // ─────────────────────────────────────────────────────────────────────────
 
   const handleSelectModel = (modelName: string) => {
@@ -124,8 +122,29 @@ export default function App() {
     setTimeout(() => setExternalInput(undefined), 100);
   };
 
-  // Loading screen while validating token
-  if (tokenValid === null) {
+  // Loading — waiting for user sign-in or subscription check
+  if (!user || subStatus === 'loading') {
+    if (!user) {
+      // Show sign-in screen
+      return (
+        <div className="h-screen flex items-center justify-center bg-slate-50 p-6 rtl">
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-sm w-full p-8 text-center">
+            <img
+              src="/george.JPG"
+              alt="האסטרטג ג'ורג' מקינזי"
+              className="w-28 h-28 rounded-full object-cover object-top mx-auto mb-4 shadow-lg"
+            />
+            <h2 className="text-xl font-bold text-slate-900 mb-2">חינם ועכשיו</h2>
+            <p className="text-slate-600 text-sm mb-6 leading-relaxed">
+              שיחת ייעוץ עם האסטרטג ג'ורג' מקינזי, לשידרוג מיידי של השיווק שלך
+            </p>
+            <AuthButton user={null} />
+            <p className="text-[10px] text-slate-400 mt-4">גרסת ניסיון — 20 הודעות + 2 שיחות קוליות</p>
+          </div>
+        </div>
+      );
+    }
+    // Subscription check in progress
     return (
       <div className="h-screen flex items-center justify-center bg-slate-50">
         <div className="flex flex-col items-center gap-3 text-slate-400">
@@ -136,63 +155,44 @@ export default function App() {
     );
   }
 
-  // Subscription required screen
-  if (tokenValid === false) {
+  // Blocked — no active subscription, trial exhausted, or cancelled
+  if (subStatus === 'blocked') {
     return (
       <div className="h-screen flex items-center justify-center bg-slate-50 p-6 rtl">
         <div className="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-sm w-full p-8 text-center">
-          <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4">
-            <Lock size={28} className="text-blue-600" />
-          </div>
-          <h2 className="text-xl font-bold text-slate-900 mb-2">נדרש מנוי פעיל</h2>
-          <p className="text-slate-500 text-sm mb-6">
-            הגישה לאסטרטג השיווקי מיועדת למנויי הפרסומאי בלבד.
-          </p>
-          <a
-            href="https://www.pirsoomai.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center justify-center gap-2 w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-colors"
-          >
-            <span>למנוי ב-הפרסומאי</span>
-            <ExternalLink size={15} />
-          </a>
-        </div>
-      </div>
-    );
-  }
-
-  // Require Google sign-in
-  if (!user) {
-    return (
-      <div className="h-screen flex items-center justify-center bg-slate-50 p-6 rtl">
-        <div className="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-sm w-full p-8 text-center">
-          {isDemo ? (
-            <img
-              src="/george.JPG"
-              alt="האסטרטג ג'ורג' מקינזי"
-              className="w-28 h-28 rounded-full object-cover object-top mx-auto mb-4 shadow-lg"
-            />
-          ) : (
-            <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Briefcase size={28} className="text-blue-600" />
-            </div>
-          )}
+          <img
+            src="/george.JPG"
+            alt="האסטרטג ג'ורג' מקינזי"
+            className="w-28 h-28 rounded-full object-cover object-top mx-auto mb-4 shadow-lg"
+          />
           <h2 className="text-xl font-bold text-slate-900 mb-2">
-            {isDemo ? 'חינם ועכשיו' : 'האסטרטג ג\'ורג\''}
+            {subscription?.status === 'cancelled' ? 'המנוי שלך בוטל' : 'גרסת הניסיון הסתיימה'}
           </h2>
-          <p className="text-slate-600 text-sm mb-6 leading-relaxed">
-            {isDemo
-              ? 'שיחת ייעוץ עם האסטרטג ג\'ורג\' מקינזי, לשידרוג מיידי של השיווק שלך'
-              : 'התחבר עם Google כדי לשמור את ההיסטוריה שלך.'}
-          </p>
-          <AuthButton user={null} />
+          <p className="text-slate-500 text-sm mb-1">מנוי חודשי — 99 ₪/חודש</p>
+          <p className="text-xs text-slate-400 mb-6">1,000 הודעות + 120 דקות קול • ג'ורג' וג'מה יחד</p>
+          <button
+            onClick={async () => {
+              if (!user) return;
+              try {
+                const r = await fetch(`/api/create-subscription?uid=${user.uid}`);
+                const { url, error } = await r.json();
+                if (url) window.open(url, '_blank');
+                else alert('שגיאה: ' + (error || 'נסה שוב'));
+              } catch { alert('שגיאת תקשורת — נסה שוב'); }
+            }}
+            className="flex items-center justify-center gap-2 w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-colors mb-3"
+          >
+            <span>רכוש מנוי — 99 ₪/חודש</span>
+            <ExternalLink size={15} />
+          </button>
+          <p className="text-[10px] text-slate-400">לאחר התשלום — רענן את הדף</p>
         </div>
       </div>
     );
   }
 
   const isInIframe = window.self !== window.top;
+  const isDemo = subStatus === 'trial';
 
   return (
     <ErrorBoundary>
@@ -274,7 +274,7 @@ export default function App() {
           </div>
           {/* Chat SECOND — in RTL flex this places it on the LEFT */}
           <div className="flex-1 min-w-0 h-full overflow-hidden">
-            <Chat externalInput={externalInput} user={user} isDemo={isDemo} />
+            <Chat externalInput={externalInput} user={user} isDemo={isDemo} subscription={subscription} />
           </div>
         </main>
       </div>

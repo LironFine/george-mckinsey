@@ -33,13 +33,18 @@ async function startServer() {
 
   app.use(express.json());
 
+  // Helper to get the API key safely and cleaned
   const getApiKey = () => {
     const key = process.env.GEMINI_API_KEY;
-    if (!key || key === "undefined" || key === "null" || key === "") return null;
+    if (!key || key === "undefined" || key === "null" || key === "") {
+      return null;
+    }
     return key.trim().replace(/["']/g, "");
   };
 
   // ── Wix token validation ─────────────────────────────────────────────────────
+  // Token format: base64url(JSON payload) + "." + HMAC-SHA256 hex signature
+  // If WIX_TOKEN_SECRET is not set the endpoint returns valid:true (dev mode).
   app.get("/api/validate-token", (req, res) => {
     const secret = (process.env.WIX_TOKEN_SECRET || "").trim();
     if (!secret) return res.json({ valid: true, dev: true });
@@ -75,10 +80,12 @@ async function startServer() {
   });
   // ─────────────────────────────────────────────────────────────────────────────
 
+  // Health check endpoint
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
 
+  // Diagnostic: list models that support Live API (bidiGenerateContent)
   app.get("/api/live-models", async (req, res) => {
     const apiKey = getApiKey();
     if (!apiKey) return res.status(500).json({ error: "No API key" });
@@ -96,15 +103,18 @@ async function startServer() {
     }
   });
 
+  // API endpoint for text chat — uses direct REST fetch, no SDK
   app.post("/api/chat", async (req, res) => {
     console.log(`Chat request received: ${JSON.stringify(req.body).substring(0, 100)}...`);
     try {
       const { messages } = req.body;
+
       if (!messages || !Array.isArray(messages)) {
         return res.status(400).json({ error: "פורמט הודעות לא תקין" });
       }
 
       const apiKey = getApiKey();
+
       if (!apiKey) {
         return res.status(500).json({
           error: "מפתח ה-API חסר בשרת.",
@@ -116,9 +126,14 @@ async function startServer() {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
       const body = {
-        system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        system_instruction: {
+          parts: [{ text: SYSTEM_PROMPT }],
+        },
         contents: messages,
-        generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 2048,
+        },
       };
 
       const geminiResponse = await fetch(url, {
@@ -130,7 +145,8 @@ async function startServer() {
       if (!geminiResponse.ok) {
         const errBody = await geminiResponse.json().catch(() => ({}));
         console.error("Gemini API error:", geminiResponse.status, errBody);
-        const msg = errBody?.error?.message || "שגיאה לא ידועה מ-Gemini API";
+        const msg =
+          errBody?.error?.message || "שגיאה לא ידועה מ-Gemini API";
         return res.status(geminiResponse.status).json({ error: msg });
       }
 
@@ -142,7 +158,10 @@ async function startServer() {
       return res.json({ text });
     } catch (error: any) {
       console.error("Backend chat error:", error);
-      res.status(500).json({ error: "חלה שגיאה בתקשורת עם Gemini", details: error.message });
+      res.status(500).json({
+        error: "חלה שגיאה בתקשורת עם Gemini",
+        details: error.message,
+      });
     }
   });
 
@@ -150,6 +169,7 @@ async function startServer() {
 
   // GET /api/create-pack?uid=xxx  → returns { url: "https://secure.cardcom.solutions/..." }
   // Uses a static Cardcom payment link (CARDCOM_PACK_URL) with ReturnValue=uid appended.
+  // Create the static link once in Cardcom UI → paste as CARDCOM_PACK_URL in Railway.
   app.get("/api/create-pack", async (req, res) => {
     const uid = (req.query.uid as string) || "";
     if (!uid) return res.status(400).json({ error: "missing uid" });
@@ -162,6 +182,7 @@ async function startServer() {
     }
 
     try {
+      // Append uid so Cardcom echoes it back in the IPN as ReturnValue
       const url = new URL(packUrl);
       url.searchParams.set("ReturnValue", uid);
       if (appUrl) {
@@ -180,7 +201,7 @@ async function startServer() {
   const handleCardcomIpn = async (req: express.Request, res: express.Response) => {
     const body = { ...req.query, ...req.body } as Record<string, string>;
     const { RetCode, ReturnValue, SumToBill, TerminalCode } = body;
-    const uid = ReturnValue || body.DocumentId || "";
+    const uid = ReturnValue || body.DocumentId || ""; // support both field names
 
     console.log("[IPN] Cardcom IPN received:", { RetCode, uid, SumToBill });
 
@@ -211,6 +232,95 @@ async function startServer() {
   app.get("/api/cardcom-ipn", handleCardcomIpn);
   // ─────────────────────────────────────────────────────────────────────────────
 
+  // ── Monthly subscription — Cardcom recurring (הוראת קבע) ────────────────────
+
+  // GET /api/create-subscription?uid=xxx
+  // Generates Cardcom recurring payment URL from CARDCOM_SUBSCRIPTION_URL env var.
+  // Cardcom IPN should point to /api/cardcom-subscription-ipn on THIS server.
+  app.get("/api/create-subscription", async (req, res) => {
+    const uid = (req.query.uid as string) || "";
+    if (!uid) return res.status(400).json({ error: "missing uid" });
+    const subUrl = (process.env.CARDCOM_SUBSCRIPTION_URL || "").trim();
+    const appUrl = (process.env.APP_URL || "").trim();
+    if (!subUrl) return res.status(500).json({ error: "CARDCOM_SUBSCRIPTION_URL not configured" });
+    try {
+      const url = new URL(subUrl);
+      url.searchParams.set("ReturnValue", `sub_${uid}`);
+      if (appUrl) {
+        url.searchParams.set("SuccessRedirectUrl", `${appUrl}/?purchase=success`);
+        url.searchParams.set("ErrorRedirectUrl",   `${appUrl}/?purchase=failed`);
+      }
+      return res.json({ url: url.toString() });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST/GET /api/cardcom-subscription-ipn
+  // Cardcom calls this after each successful recurring charge.
+  // Identifies subscription IPNs by ReturnValue starting with "sub_".
+  const handleSubscriptionIpn = async (req: express.Request, res: express.Response) => {
+    const body = { ...req.query, ...req.body } as Record<string, string>;
+    const { RetCode, ReturnValue, DealNumber } = body;
+    console.log("[SubIPN] Received:", { RetCode, ReturnValue, DealNumber });
+
+    if (String(RetCode) !== "0") return res.send("FAILED");
+    // Only process IPNs that were created by our create-subscription endpoint
+    if (!ReturnValue || !ReturnValue.startsWith("sub_")) return res.send("NOT_SUBSCRIPTION");
+    const uid = ReturnValue.slice(4); // strip "sub_" prefix
+    if (!uid)    return res.send("NO_UID");
+    if (!adminDb) return res.status(500).send("DB_NOT_INITIALIZED");
+
+    try {
+      await adminDb.doc(`users/${uid}`).set({
+        subscription: {
+          status: "active",
+          cardcomDealNumber: String(DealNumber || ""),
+          currentPeriodEnd: Date.now() + 31 * 24 * 60 * 60 * 1000,
+          activatedAt: Date.now(),
+          cancelledAt: null,
+        }
+      }, { merge: true });
+      console.log(`[SubIPN] Subscription activated → ${uid}`);
+      return res.send("OK");
+    } catch (err: any) {
+      console.error("[SubIPN] Firestore error:", err.message);
+      return res.status(500).send("DB_ERROR");
+    }
+  };
+
+  app.post("/api/cardcom-subscription-ipn", handleSubscriptionIpn);
+  app.get("/api/cardcom-subscription-ipn",  handleSubscriptionIpn);
+
+  // POST /api/cancel-subscription
+  // Calls Cardcom cancellation API; client handles the Firestore update.
+  // ⚠️ Verify exact Cardcom CancelDeal endpoint before going live.
+  app.post("/api/cancel-subscription", async (req, res) => {
+    const { uid, dealNumber } = req.body;
+    if (!uid) return res.status(400).json({ error: "missing uid" });
+
+    if (dealNumber && process.env.CARDCOM_TERMINAL) {
+      try {
+        const params = new URLSearchParams({
+          TerminalCode: process.env.CARDCOM_TERMINAL,
+          DealNumber:   String(dealNumber),
+          APILevel:     "10",
+          APIName:      process.env.CARDCOM_API_NAME     || "",
+          APIPassword:  process.env.CARDCOM_API_PASSWORD || "",
+        });
+        const r = await fetch(`https://secure.cardcom.solutions/interface/CancelDeal.aspx?${params}`);
+        const text = await r.text();
+        console.log("[Cancel] Cardcom response:", text);
+      } catch (err: any) {
+        console.error("[Cancel] Cardcom API error:", err.message);
+        // Don't fail the request — let client update Firestore
+      }
+    }
+    return res.json({ ok: true });
+  });
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     try {
       const vite = await createViteServer({
@@ -230,8 +340,11 @@ async function startServer() {
     });
   }
 
+  // Create HTTP server (needed for WebSocket upgrade)
   const server = createHttpServer(app);
 
+  // WebSocket proxy — connects frontend to Gemini Live API
+  // API key stays on the server; browser only sends/receives audio via our WS
   const wss = new WebSocketServer({ server, path: "/api/voice-ws" });
 
   wss.on("connection", (ws) => {
@@ -244,6 +357,7 @@ async function startServer() {
       return;
     }
 
+    // Connect directly to Gemini Live WebSocket — no SDK, no compatibility issues
     const geminiUrl =
       `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${apiKey}`;
 
@@ -273,6 +387,7 @@ async function startServer() {
     geminiWs.on("message", (data) => {
       try {
         const msg = JSON.parse(data.toString());
+        // setupComplete signals Gemini is ready
         if (msg.setupComplete !== undefined) {
           console.log("Gemini Live setup complete");
           if (ws.readyState === ws.OPEN) {
@@ -280,6 +395,7 @@ async function startServer() {
           }
           return;
         }
+        // Forward all other messages to the browser
         if (ws.readyState === ws.OPEN) {
           ws.send(JSON.stringify({ type: "message", data: msg }));
         }
@@ -300,6 +416,7 @@ async function startServer() {
       if (ws.readyState === ws.OPEN) ws.close();
     });
 
+    // Forward messages from browser → Gemini
     ws.on("message", (data) => {
       try {
         const msg = JSON.parse(data.toString());
