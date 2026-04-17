@@ -8,7 +8,7 @@ import { Message } from '../types';
 import { sendMessageToGemini } from '../services/gemini';
 import { INITIAL_MESSAGE } from '../constants';
 import { voiceService } from '../services/voiceService';
-import { checkAndIncrementUsage, checkVoiceMinutesAvailable, recordVoiceUsage, setVisitorId, incrementDemoTextUsage, incrementDemoVoiceUsage, getPurchasedCredits, deductPurchasedText, deductPurchasedVoice } from '../services/usageService';
+import { checkAndIncrementMonthlyText, checkVoiceMinutesAvailableForUser, recordVoiceUsageForUser, setVisitorId, incrementDemoTextUsage, incrementDemoVoiceUsage, getPurchasedCredits, deductPurchasedText, deductPurchasedVoice } from '../services/usageService';
 import { saveSession, loadSession } from '../services/historyService';
 
 export default function Chat({ externalInput, user, isDemo }: { externalInput?: string; user?: FirebaseUser | null; isDemo?: boolean }) {
@@ -155,7 +155,9 @@ export default function Chat({ externalInput, user, isDemo }: { externalInput?: 
           setDemoWarning(`נותרו לך ${remaining} הודעות בגרסת הניסיון`);
         }
       } else {
-        const { allowed, remaining } = await checkAndIncrementUsage();
+        const { allowed, remaining } = user
+          ? await checkAndIncrementMonthlyText(user.uid)
+          : { allowed: false, remaining: 0 };
         if (!allowed) {
           // Check for purchased text credits before blocking
           if (user) {
@@ -579,7 +581,7 @@ ${voiceUserLines.join('\n')}
 
     if (isVoiceActive) {
       voiceService.stop();
-      recordVoiceUsage(voiceStartTimeRef.current);
+      if (user) recordVoiceUsageForUser(user.uid, voiceStartTimeRef.current);
       setIsVoiceActive(false);
     } else {
       if (!window.WebSocket) {
@@ -595,8 +597,10 @@ ${voiceUserLines.join('\n')}
         return;
       }
 
-      // Check monthly voice minutes limit (90 min free)
-      const { allowed, remainingMinutes, resetDays } = await checkVoiceMinutesAvailable();
+      // Check monthly voice minutes limit (Firestore-based, shared across apps)
+      const { allowed, remainingMinutes, resetDays } = user
+        ? await checkVoiceMinutesAvailableForUser(user.uid)
+        : { allowed: false, remainingMinutes: 0, resetDays: 0 };
       if (!allowed) {
         // Check for purchased voice credits before blocking
         const hasPaidCredits = user
@@ -650,7 +654,7 @@ ${voiceUserLines.join('\n')}
         },
         onError: (err) => {
           console.error(err);
-          recordVoiceUsage(voiceStartTimeRef.current);
+          if (user) recordVoiceUsageForUser(user.uid, voiceStartTimeRef.current);
           setIsVoiceActive(false);
           const errMsg: Message = {
             id: Date.now().toString(),
@@ -661,7 +665,7 @@ ${voiceUserLines.join('\n')}
           setMessages((prev) => [...prev, errMsg]);
         },
         onClose: () => {
-          recordVoiceUsage(voiceStartTimeRef.current);
+          if (user) recordVoiceUsageForUser(user.uid, voiceStartTimeRef.current);
           // If session used purchased credits, deduct the actual minutes used
           if (usingPaidVoiceRef.current && user && voiceStartTimeRef.current) {
             const minsUsed = Math.ceil((Date.now() - voiceStartTimeRef.current) / 60000);

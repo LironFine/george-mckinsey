@@ -1,11 +1,43 @@
 import { doc, getDoc, setDoc, updateDoc, increment } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 
+// ── Free tier limits — שנה כאן כדי לשנות הקצאה חינמית למנויים ──────────────
+export const MONTHLY_TEXT_LIMIT  = 1000;  // הודעות טקסט בחודש (משותף בין כל האתרים)
+export const MONTHLY_VOICE_LIMIT = 120;   // דקות קול בחודש (משותף בין כל האתרים)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** @deprecated Use checkAndIncrementMonthlyText(uid) instead */
 const DAILY_LIMIT = 100;
-const MONTHLY_VOICE_MINUTES_LIMIT = 90; // ~8 NIS worth of Gemini Live API
+/** @deprecated Use MONTHLY_VOICE_LIMIT instead */
+const MONTHLY_VOICE_MINUTES_LIMIT = 90;
 
-// ── Text chat usage ──────────────────────────────────────────────────────────
+// ── Monthly text usage — Firestore-based (shared across apps by UID) ─────────
 
+/**
+ * Check and increment monthly text usage for a logged-in user.
+ * Tracked in Firestore so it's shared between George and Gemma.
+ */
+export async function checkAndIncrementMonthlyText(uid: string): Promise<{ allowed: boolean; remaining: number }> {
+  if (!db || !uid) return { allowed: true, remaining: MONTHLY_TEXT_LIMIT };
+  try {
+    const fieldName = `freeText_${getMonthKey()}`;
+    const ref = doc(db, 'users', uid);
+    const snap = await getDoc(ref);
+    const used = Number((snap.data() || {})[fieldName] || 0);
+    if (used >= MONTHLY_TEXT_LIMIT) return { allowed: false, remaining: 0 };
+    await updateDoc(ref, { [fieldName]: increment(1) }).catch(async () => {
+      // Document might not exist yet — create it first
+      await setDoc(ref, { [fieldName]: 1 }, { merge: true });
+    });
+    return { allowed: true, remaining: MONTHLY_TEXT_LIMIT - used - 1 };
+  } catch {
+    return { allowed: true, remaining: MONTHLY_TEXT_LIMIT };
+  }
+}
+
+// ── Text chat usage (localStorage — @deprecated) ─────────────────────────────
+
+/** @deprecated Use checkAndIncrementMonthlyText(uid) instead */
 export async function checkAndIncrementUsage(): Promise<{ allowed: boolean; remaining: number }> {
   try {
     const today = new Date().toISOString().split('T')[0];
@@ -60,7 +92,51 @@ function getDaysUntilReset(): number {
   return Math.ceil((firstOfNextMonth.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
 }
 
-/** Check if the user has remaining voice minutes before starting a session. */
+// ── Monthly voice usage — Firestore-based (shared across apps by UID) ────────
+
+/**
+ * Check if a logged-in user has remaining free voice minutes.
+ * Tracked in Firestore so it's shared between George and Gemma.
+ */
+export async function checkVoiceMinutesAvailableForUser(uid: string): Promise<{
+  allowed: boolean;
+  remainingMinutes: number;
+  resetDays: number;
+}> {
+  if (!db || !uid) return { allowed: true, remainingMinutes: MONTHLY_VOICE_LIMIT, resetDays: 30 };
+  try {
+    const fieldName = `freeVoice_${getMonthKey()}_min`;
+    const snap = await getDoc(doc(db, 'users', uid));
+    const used = Number((snap.data() || {})[fieldName] || 0);
+    const remaining = Math.max(0, MONTHLY_VOICE_LIMIT - used);
+    const resetDays = getDaysUntilReset();
+    return { allowed: remaining > 0, remainingMinutes: Math.floor(remaining), resetDays };
+  } catch {
+    return { allowed: true, remainingMinutes: MONTHLY_VOICE_LIMIT, resetDays: 30 };
+  }
+}
+
+/**
+ * Record voice session duration for a logged-in user.
+ * Call when session ends — deducts from monthly Firestore counter.
+ */
+export async function recordVoiceUsageForUser(uid: string, startTime: number): Promise<void> {
+  if (!db || !uid) return;
+  try {
+    const elapsedMinutes = (Date.now() - startTime) / 60000;
+    if (elapsedMinutes < 5 / 60) return; // ignore sessions under 5 seconds
+    const fieldName = `freeVoice_${getMonthKey()}_min`;
+    await updateDoc(doc(db, 'users', uid), { [fieldName]: increment(elapsedMinutes) }).catch(async () => {
+      await setDoc(doc(db, 'users', uid), { [fieldName]: elapsedMinutes }, { merge: true });
+    });
+  } catch {
+    // Fail silently
+  }
+}
+
+// ── Voice usage (localStorage — @deprecated) ─────────────────────────────────
+
+/** @deprecated Use checkVoiceMinutesAvailableForUser(uid) instead */
 export async function checkVoiceMinutesAvailable(): Promise<{
   allowed: boolean;
   remainingMinutes: number;
