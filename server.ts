@@ -187,17 +187,19 @@ async function startServer() {
         APIName:            apiName,
         APIPassword:        apiPassword,
         APILevel:           "10",
-        DocumentId:         uid,
+        ReturnValue:        uid,            // our user id — comes back in IPN
         CoinID:             "1",
         SumToBill:          "50",
-        ProductName:        "חבילת שימוש — 300 הודעות + 90 דקות קול",
-        ProductQuantity:    "1",
-        ProductPrice:       "50",
+        ProductName1:       "Pack 300+90",  // ASCII to avoid encoding issues
+        Quantity1:          "1",
+        UnitPrice1:         "50",
         IPNUrl:             `${appUrl}/api/cardcom-ipn`,
         SuccessRedirectUrl: `${appUrl}/?purchase=success`,
         ErrorRedirectUrl:   `${appUrl}/?purchase=failed`,
         Language:           "he",
       });
+
+      console.log("[Pack] Sending to Cardcom:", Object.fromEntries(params));
 
       const resp = await fetch(
         "https://secure.cardcom.solutions/interface/ChargeAccordingToProductList.aspx",
@@ -227,26 +229,27 @@ async function startServer() {
   // POST/GET /api/cardcom-ipn  — Cardcom calls this after successful payment
   const handleCardcomIpn = async (req: express.Request, res: express.Response) => {
     const body = { ...req.query, ...req.body } as Record<string, string>;
-    const { RetCode, DocumentId, SumToBill, TerminalCode } = body;
+    const { RetCode, ReturnValue, SumToBill, TerminalCode } = body;
+    const uid = ReturnValue || body.DocumentId || ""; // support both field names
 
-    console.log("[IPN] Cardcom IPN received:", { RetCode, DocumentId, SumToBill });
+    console.log("[IPN] Cardcom IPN received:", { RetCode, uid, SumToBill });
 
-    if (String(RetCode) !== "0")           return res.send("FAILED");
-    if (!DocumentId)                       return res.send("NO_UID");
-    if (Number(SumToBill) < 50)            return res.send("AMOUNT_TOO_LOW");
+    if (String(RetCode) !== "0")  return res.send("FAILED");
+    if (!uid)                     return res.send("NO_UID");
+    if (Number(SumToBill) < 50)   return res.send("AMOUNT_TOO_LOW");
     if (TerminalCode !== (process.env.CARDCOM_TERMINAL || "").trim())
-                                           return res.send("WRONG_TERMINAL");
-    if (!adminDb)                          return res.status(500).send("DB_NOT_INITIALIZED");
+                                  return res.send("WRONG_TERMINAL");
+    if (!adminDb)                 return res.status(500).send("DB_NOT_INITIALIZED");
 
     try {
-      await adminDb.doc(`users/${DocumentId}`).set(
+      await adminDb.doc(`users/${uid}`).set(
         {
           purchasedTextMessages: admin.firestore.FieldValue.increment(300),
           purchasedVoiceMinutes: admin.firestore.FieldValue.increment(90),
         },
         { merge: true }
       );
-      console.log(`[IPN] Pack added → ${DocumentId}: +300 text, +90 voice-min`);
+      console.log(`[IPN] Pack added → ${uid}: +300 text, +90 voice-min`);
       return res.send("OK");
     } catch (err: any) {
       console.error("[IPN] Firestore error:", err.message);
