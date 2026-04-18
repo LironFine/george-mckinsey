@@ -1,6 +1,6 @@
 import React, { useState, useEffect, Component, ErrorInfo, ReactNode } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDocFromServer } from 'firebase/firestore';
 import { auth, db } from './lib/firebase';
 import Chat from './components/Chat';
 import Sidebar from './components/Sidebar';
@@ -91,8 +91,8 @@ export default function App() {
     (async () => {
       try {
         const [userSnap, demoSnap] = await Promise.all([
-          getDoc(doc(db, 'users', user.uid)),
-          getDoc(doc(db, 'demo_usage', user.uid)),
+          getDocFromServer(doc(db, 'users', user.uid)),
+          getDocFromServer(doc(db, 'demo_usage', user.uid)),
         ]);
         const sub = (userSnap.data() || {}).subscription;
         const demo = demoSnap.data() || { textCount: 0, voiceCount: 0 };
