@@ -287,22 +287,41 @@ async function startServer() {
     // IsActive='1' → activate; IsActive='0' → cancel
     const newStatus = isActive === "1" ? "active" : "cancelled";
     try {
-      await adminDb.doc(`users/${uid}`).set({
-        subscription: {
-          status: newStatus,
-          cardcomRecurringId: recurringId,
-          currentPeriodEnd: newStatus === "active"
-            ? Date.now() + 31 * 24 * 60 * 60 * 1000
-            : (await adminDb.doc(`users/${uid}`).get()).data()?.subscription?.currentPeriodEnd ?? Date.now(),
-          activatedAt: newStatus === "active" ? Date.now() : undefined,
-          cancelledAt: newStatus === "cancelled" ? Date.now() : null,
-        }
-      }, { merge: true });
+      const update: Record<string, any> = {
+        "subscription.status": newStatus,
+        "subscription.cardcomRecurringId": recurringId,
+      };
+      if (newStatus === "active") {
+        update["subscription.currentPeriodEnd"] = Date.now() + 31 * 24 * 60 * 60 * 1000;
+        update["subscription.activatedAt"] = Date.now();
+        update["subscription.cancelledAt"] = null;
+      } else {
+        update["subscription.cancelledAt"] = Date.now();
+      }
+      await adminDb.doc(`users/${uid}`).update(update);
       console.log(`[SubIPN] Subscription ${newStatus} → ${uid} (${email})`);
       return res.send("OK");
     } catch (err: any) {
-      console.error("[SubIPN] Firestore error:", err.message);
-      return res.status(500).send("DB_ERROR");
+      // Document might not exist yet — use set with merge
+      try {
+        const sub: Record<string, any> = {
+          status: newStatus,
+          cardcomRecurringId: recurringId,
+        };
+        if (newStatus === "active") {
+          sub.currentPeriodEnd = Date.now() + 31 * 24 * 60 * 60 * 1000;
+          sub.activatedAt = Date.now();
+          sub.cancelledAt = null;
+        } else {
+          sub.cancelledAt = Date.now();
+        }
+        await adminDb.doc(`users/${uid}`).set({ subscription: sub }, { merge: true });
+        console.log(`[SubIPN] Subscription ${newStatus} (set) → ${uid} (${email})`);
+        return res.send("OK");
+      } catch (err2: any) {
+        console.error("[SubIPN] Firestore error:", err2.message);
+        return res.status(500).send("DB_ERROR");
+      }
     }
   };
 
