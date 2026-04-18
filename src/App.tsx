@@ -83,14 +83,19 @@ export default function App() {
     return unsub;
   }, []);
 
-  // Re-check after returning from Cardcom payment
+  // Poll Firestore after returning from Cardcom payment until subscription is active
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('purchase') === 'success' && user) {
-      setSubStatus('loading');
-      const t = setTimeout(() => setRecheckKey(k => k + 1), 3000);
-      return () => clearTimeout(t);
-    }
+    if (!params.get('purchase') || !user) return;
+    setSubStatus('loading');
+    let attempts = 0;
+    const MAX = 10;
+    const poll = setInterval(() => {
+      attempts++;
+      setRecheckKey(k => k + 1);
+      if (attempts >= MAX) clearInterval(poll);
+    }, 4000);
+    return () => clearInterval(poll);
   }, [user?.uid]);
 
   // ── Subscription check — reads from Firestore after Google sign-in ────────
