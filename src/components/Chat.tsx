@@ -1016,14 +1016,6 @@ ${voiceUserLines.join('\n')}
             <span className="truncate">פגישה עם לירון פיין</span>
             <ExternalLink size={8} className="opacity-70 sm:w-[10px] sm:h-[10px]" />
           </a>
-          {subscription?.status === 'active' && (
-            <button
-              onClick={handleCancelSubscription}
-              className="flex items-center justify-center gap-1.5 px-2 py-1.5 sm:px-4 sm:py-2 bg-slate-50 text-slate-400 rounded-full text-[9px] sm:text-[11px] font-medium hover:bg-red-50 hover:text-red-500 transition-colors border border-slate-200"
-            >
-              <span className="truncate">ביטול מנוי</span>
-            </button>
-          )}
         </div>
         </>)}
 
