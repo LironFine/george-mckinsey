@@ -615,6 +615,13 @@ async function startServer() {
               },
             },
           },
+          // Reduce end-of-speech detection delay → faster response after user stops talking
+          realtimeInputConfig: {
+            automaticActivityDetection: {
+              endOfSpeechSensitivity: "END_SENSITIVITY_HIGH",
+              silenceDurationMs: 600,
+            },
+          },
           system_instruction: {
             parts: [{ text: SYSTEM_PROMPT }],
           },
