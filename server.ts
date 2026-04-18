@@ -284,8 +284,8 @@ async function startServer() {
       return res.send("USER_NOT_FOUND");
     }
 
-    // IsActive='1' → activate; IsActive='0' → cancel
-    const newStatus = isActive === "1" ? "active" : "cancelled";
+    // IsActive: '1' or 'True' → activate; '0' or 'False' → cancel
+    const newStatus = (isActive === "1" || isActive.toLowerCase() === "true") ? "active" : "cancelled";
     try {
       const update: Record<string, any> = {
         "subscription.status": newStatus,
