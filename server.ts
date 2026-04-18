@@ -328,6 +328,31 @@ async function startServer() {
   app.post("/api/cardcom-subscription-ipn", handleSubscriptionIpn);
   app.get("/api/cardcom-subscription-ipn",  handleSubscriptionIpn);
 
+  // GET /api/admin/activate-subscription?uid=xxx&secret=yyy
+  // Temporary manual activation for testing (protected by ADMIN_SECRET env var).
+  app.get("/api/admin/activate-subscription", async (req, res) => {
+    const secret = (process.env.ADMIN_SECRET || "").trim();
+    const { uid, secret: reqSecret } = req.query as Record<string, string>;
+    if (!secret || reqSecret !== secret) return res.status(401).send("UNAUTHORIZED");
+    if (!uid) return res.status(400).send("MISSING_UID");
+    if (!adminDb) return res.status(500).send("DB_NOT_INITIALIZED");
+    try {
+      await adminDb.doc(`users/${uid}`).set({
+        subscription: {
+          status: "active",
+          currentPeriodEnd: Date.now() + 31 * 24 * 60 * 60 * 1000,
+          activatedAt: Date.now(),
+          cancelledAt: null,
+          cardcomRecurringId: "manual",
+        }
+      }, { merge: true });
+      console.log(`[Admin] Manual activation → ${uid}`);
+      return res.send(`OK — subscription activated for ${uid}`);
+    } catch (err: any) {
+      return res.status(500).send("DB_ERROR: " + err.message);
+    }
+  });
+
   // POST /api/cancel-subscription
   // Calls Cardcom cancellation API; client handles the Firestore update.
   // ⚠️ Verify exact Cardcom CancelDeal endpoint before going live.
