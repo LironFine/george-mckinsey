@@ -355,7 +355,6 @@ async function startServer() {
 
   // POST /api/cancel-subscription
   // Calls Cardcom cancellation API; client handles the Firestore update.
-  // ⚠️ Verify exact Cardcom CancelDeal endpoint before going live.
   app.post("/api/cancel-subscription", async (req, res) => {
     const { uid, dealNumber } = req.body;
     if (!uid) return res.status(400).json({ error: "missing uid" });
@@ -374,11 +373,190 @@ async function startServer() {
         console.log("[Cancel] Cardcom response:", text);
       } catch (err: any) {
         console.error("[Cancel] Cardcom API error:", err.message);
-        // Don't fail the request — let client update Firestore
       }
     }
     return res.json({ ok: true });
   });
+
+  // ── Full account cancellation — standalone page + API ────────────────────────
+
+  // GET /cancel — standalone cancellation page (link from Wix)
+  app.get("/cancel", (_req, res) => {
+    const firebaseConfig = {
+      apiKey:            "AIzaSyCGCQCTDNKI3SEBrwlmUUQeQfuLvM0mjJM",
+      authDomain:        "gen-lang-client-0766618683.firebaseapp.com",
+      projectId:         "gen-lang-client-0766618683",
+      messagingSenderId: "478311515884",
+      appId:             "1:478311515884:web:103fb4b7a3df9230d787c9",
+    };
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(`<!DOCTYPE html>
+<html dir="rtl" lang="he">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ביטול מנוי</title>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 24px; }
+    .card { background: #fff; border-radius: 24px; box-shadow: 0 4px 32px rgba(0,0,0,0.10); padding: 40px 36px; max-width: 420px; width: 100%; text-align: center; }
+    .avatar { width: 80px; height: 80px; border-radius: 50%; object-fit: cover; margin-bottom: 20px; border: 3px solid #fff; box-shadow: 0 2px 12px rgba(0,0,0,0.12); }
+    h1 { font-size: 1.3rem; font-weight: 700; color: #1e293b; margin-bottom: 10px; }
+    p { color: #64748b; font-size: 0.92rem; line-height: 1.6; margin-bottom: 20px; }
+    .warning { background: #fef3c7; border: 1px solid #fcd34d; border-radius: 12px; padding: 16px; margin-bottom: 24px; color: #92400e; font-size: 0.88rem; line-height: 1.6; text-align: right; }
+    .btn { width: 100%; padding: 14px; border-radius: 12px; font-size: 0.95rem; font-weight: 700; cursor: pointer; border: none; transition: all 0.2s; margin-bottom: 10px; }
+    .btn-danger { background: #ef4444; color: #fff; }
+    .btn-danger:hover { background: #dc2626; }
+    .btn-secondary { background: #f1f5f9; color: #475569; }
+    .btn-secondary:hover { background: #e2e8f0; }
+    .btn-google { background: #fff; color: #374151; border: 1px solid #d1d5db; display: flex; align-items: center; justify-content: center; gap: 10px; }
+    .btn-google:hover { background: #f9fafb; }
+    .spinner { width: 36px; height: 36px; border: 3px solid #e2e8f0; border-top-color: #3b82f6; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .success-icon { font-size: 3rem; margin-bottom: 12px; }
+    #screen-loading, #screen-signin, #screen-warning, #screen-confirming, #screen-done { display: none; }
+  </style>
+</head>
+<body>
+<div class="card">
+  <img src="https://george-mckinsey-production.up.railway.app/george.JPG" class="avatar" alt="ג'ורג'" onerror="this.style.display='none'">
+
+  <!-- Loading -->
+  <div id="screen-loading">
+    <div class="spinner"></div>
+    <p>טוען...</p>
+  </div>
+
+  <!-- Sign in -->
+  <div id="screen-signin">
+    <h1>ביטול מנוי</h1>
+    <p>כדי לבטל את המנוי, יש להתחבר תחילה עם חשבון Google שלך.</p>
+    <button class="btn btn-google" onclick="signIn()">
+      <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+      כניסה עם Google
+    </button>
+  </div>
+
+  <!-- Warning -->
+  <div id="screen-warning">
+    <h1>ביטול מנוי</h1>
+    <div class="warning">
+      ⚠️ כל המידע שיש למערכת על העסק שלך יימחק מהזיכרון מיידית לצמיתות על מנת להבטיח את הפרטיות שלך, ואי אפשר יהיה לשחזר אותו או להתחיל מחדש תוכנית ניסיון.
+    </div>
+    <button class="btn btn-danger" onclick="confirmCancel()">בטוח, מחק אותי עכשיו</button>
+    <button class="btn btn-secondary" onclick="window.close()">אני רוצה להמשיך לעבוד</button>
+  </div>
+
+  <!-- Confirming -->
+  <div id="screen-confirming">
+    <div class="spinner"></div>
+    <p>מבטל מנוי ומוחק נתונים...</p>
+  </div>
+
+  <!-- Done -->
+  <div id="screen-done">
+    <div class="success-icon">✓</div>
+    <h1>המנוי בוטל</h1>
+    <p>הנתונים נמחקו. תודה שהשתמשת בשירות.</p>
+  </div>
+</div>
+
+<script>
+  firebase.initializeApp(${JSON.stringify(firebaseConfig)});
+  const auth = firebase.auth();
+
+  function show(id) {
+    ['loading','signin','warning','confirming','done'].forEach(s =>
+      document.getElementById('screen-' + s).style.display = 'none'
+    );
+    document.getElementById('screen-' + id).style.display = 'block';
+  }
+
+  show('loading');
+
+  auth.onAuthStateChanged(user => {
+    if (user) show('warning');
+    else show('signin');
+  });
+
+  function signIn() {
+    auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()).catch(console.error);
+  }
+
+  async function confirmCancel() {
+    show('confirming');
+    try {
+      const idToken = await auth.currentUser.getIdToken();
+      const r = await fetch('/api/cancel-account', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken }),
+      });
+      const data = await r.json();
+      if (data.ok) {
+        await auth.signOut();
+        show('done');
+      } else {
+        alert('שגיאה: ' + (data.error || 'נסה שוב'));
+        show('warning');
+      }
+    } catch (e) {
+      alert('שגיאת תקשורת — נסה שוב');
+      show('warning');
+    }
+  }
+</script>
+</body>
+</html>`);
+  });
+
+  // POST /api/cancel-account — verifies Firebase ID token, cancels Cardcom, wipes data
+  app.post("/api/cancel-account", async (req, res) => {
+    const { idToken } = req.body;
+    if (!idToken) return res.status(400).json({ error: "missing idToken" });
+    if (!adminDb)  return res.status(500).json({ error: "DB_NOT_INITIALIZED" });
+
+    let uid: string;
+    try {
+      const decoded = await admin.auth().verifyIdToken(idToken);
+      uid = decoded.uid;
+    } catch {
+      return res.status(401).json({ error: "invalid token" });
+    }
+
+    // 1. Cancel Cardcom recurring billing
+    try {
+      const userDoc = await adminDb.doc(`users/${uid}`).get();
+      const recurringId = userDoc.data()?.subscription?.cardcomRecurringId;
+      if (recurringId && recurringId !== "manual" && process.env.CARDCOM_TERMINAL) {
+        const params = new URLSearchParams({
+          TerminalCode: process.env.CARDCOM_TERMINAL,
+          RecurringId:  String(recurringId),
+          APILevel:     "10",
+          APIName:      process.env.CARDCOM_API_NAME     || "",
+          APIPassword:  process.env.CARDCOM_API_PASSWORD || "",
+        });
+        const r = await fetch(`https://secure.cardcom.solutions/interface/CancelRecurring.aspx?${params}`);
+        console.log("[CancelAccount] Cardcom:", await r.text());
+      }
+    } catch (err: any) {
+      console.warn("[CancelAccount] Cardcom cancel failed (continuing):", err.message);
+    }
+
+    // 2. Wipe user data — keep only demo_usage with max counts (blocks future trial)
+    try {
+      await adminDb.doc(`users/${uid}`).delete();
+      await adminDb.doc(`demo_usage/${uid}`).set({ textCount: 9999, voiceCount: 9999 }, { merge: true });
+      console.log(`[CancelAccount] Account wiped → ${uid}`);
+      return res.json({ ok: true });
+    } catch (err: any) {
+      console.error("[CancelAccount] Firestore error:", err.message);
+      return res.status(500).json({ error: "DB_ERROR" });
+    }
+  });
+  // ─────────────────────────────────────────────────────────────────────────────
   // ─────────────────────────────────────────────────────────────────────────────
 
   // Vite middleware for development
