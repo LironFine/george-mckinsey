@@ -139,7 +139,6 @@ export default function App() {
               שיחת ייעוץ עם האסטרטג ג'ורג' מקינזי, לשידרוג מיידי של השיווק שלך
             </p>
             <AuthButton user={null} />
-            <p className="text-[10px] text-slate-400 mt-4">גרסת ניסיון — 20 הודעות + 2 שיחות קוליות</p>
           </div>
         </div>
       );

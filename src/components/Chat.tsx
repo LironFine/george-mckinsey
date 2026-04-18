@@ -841,7 +841,7 @@ ${voiceUserLines.join('\n')}
       <div className="p-2 sm:p-4 bg-white border-t border-slate-100">
         {demoWarning && (
           <div className="max-w-4xl mx-auto mb-2 px-4 py-2 bg-amber-50 border border-amber-200 rounded-xl text-center text-xs text-amber-700 font-medium">
-            {demoWarning} — <button onClick={handleSubscribe} className="underline font-bold">רכוש מנוי</button>
+            אשמח לשוחח איתך עוד, כי הפוטנציאל גדול. פשוט צריך <button onClick={handleSubscribe} className="underline font-bold">לרכוש מנוי לשירותים שלנו</button> — זה זול ומשתלם
           </div>
         )}
 
