@@ -76,11 +76,22 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [subStatus, setSubStatus] = useState<SubStatus>('loading');
   const [subscription, setSubscription] = useState<any>(null);
+  const [recheckKey, setRecheckKey] = useState(0);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, setUser);
     return unsub;
   }, []);
+
+  // Re-check after returning from Cardcom payment
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('purchase') === 'success' && user) {
+      setSubStatus('loading');
+      const t = setTimeout(() => setRecheckKey(k => k + 1), 3000);
+      return () => clearTimeout(t);
+    }
+  }, [user?.uid]);
 
   // ── Subscription check — reads from Firestore after Google sign-in ────────
   useEffect(() => {
@@ -88,6 +99,7 @@ export default function App() {
       setSubStatus('loading');
       return;
     }
+    setSubStatus('loading');
     (async () => {
       try {
         const [userSnap, demoSnap] = await Promise.all([
@@ -102,7 +114,7 @@ export default function App() {
           setSubStatus('active');
         } else if (sub?.status === 'cancelled' || sub?.status === 'expired') {
           setSubStatus('blocked');
-        } else if ((demo.textCount || 0) < 20 && (demo.voiceCount || 0) < 2) {
+        } else if ((demo.textCount || 0) < 30 && (demo.voiceCount || 0) < 2) {
           setSubStatus('trial');
         } else {
           setSubStatus('blocked');
@@ -112,7 +124,7 @@ export default function App() {
         setSubStatus('trial'); // fail-open: allow trial if check fails
       }
     })();
-  }, [user?.uid]);
+  }, [user?.uid, recheckKey]);
   // ─────────────────────────────────────────────────────────────────────────
 
   const handleSelectModel = (modelName: string) => {
@@ -156,6 +168,16 @@ export default function App() {
 
   // Blocked — no active subscription, trial exhausted, or cancelled
   if (subStatus === 'blocked') {
+    const isCancelled = subscription?.status === 'cancelled';
+    const handleSubscribe = async () => {
+      if (!user) return;
+      try {
+        const r = await fetch(`/api/create-subscription?uid=${user.uid}`);
+        const { url, error } = await r.json();
+        if (url) window.open(url, '_blank');
+        else alert('שגיאה: ' + (error || 'נסה שוב'));
+      } catch { alert('שגיאת תקשורת — נסה שוב'); }
+    };
     return (
       <div className="h-screen flex items-center justify-center bg-slate-50 p-6 rtl">
         <div className="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-sm w-full p-8 text-center">
@@ -165,26 +187,33 @@ export default function App() {
             className="w-28 h-28 rounded-full object-cover object-top mx-auto mb-4 shadow-lg"
           />
           <h2 className="text-xl font-bold text-slate-900 mb-2">
-            {subscription?.status === 'cancelled' ? 'המנוי שלך בוטל' : 'גרסת הניסיון הסתיימה'}
+            {isCancelled ? 'המנוי שלך בוטל' : 'גרסת הניסיון הסתיימה'}
           </h2>
-          <p className="text-slate-500 text-sm mb-1">מנוי חודשי — 99 ₪/חודש</p>
-          <p className="text-xs text-slate-400 mb-6">1,000 הודעות + 120 דקות קול • ג'ורג' וג'מה יחד</p>
+          <p className="text-slate-600 text-sm leading-relaxed mb-4">
+            {isCancelled
+              ? 'אשמח להמשיך לעבוד איתך — רכוש מנוי חדש ונמשיך ממש מאותה נקודה.'
+              : 'כדי להמשיך לעבוד יחד, נדרש מנוי חודשי.'}
+          </p>
           <button
-            onClick={async () => {
-              if (!user) return;
-              try {
-                const r = await fetch(`/api/create-subscription?uid=${user.uid}`);
-                const { url, error } = await r.json();
-                if (url) window.open(url, '_blank');
-                else alert('שגיאה: ' + (error || 'נסה שוב'));
-              } catch { alert('שגיאת תקשורת — נסה שוב'); }
-            }}
+            onClick={handleSubscribe}
+            className="w-full text-sm text-blue-600 hover:text-blue-800 underline underline-offset-2 mb-4 cursor-pointer bg-transparent border-none"
+          >
+            מנוי חודשי — 99 ₪/חודש • 1,000 הודעות + 120 דקות קול • ג'ורג' וג'מה יחד
+          </button>
+          <button
+            onClick={handleSubscribe}
             className="flex items-center justify-center gap-2 w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-colors mb-3"
           >
             <span>רכוש מנוי — 99 ₪/חודש</span>
             <ExternalLink size={15} />
           </button>
-          <p className="text-[10px] text-slate-400">לאחר התשלום — רענן את הדף</p>
+          <p className="text-xs text-slate-500 mb-4">לאחר התשלום יש לרענן את הדף.</p>
+          <button
+            onClick={() => { setSubStatus('loading'); setTimeout(() => setRecheckKey(k => k + 1), 200); }}
+            className="text-xs text-slate-400 hover:text-blue-600 underline underline-offset-2"
+          >
+            כבר שילמתי — בדוק שוב
+          </button>
         </div>
       </div>
     );
