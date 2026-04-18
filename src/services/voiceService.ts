@@ -23,6 +23,7 @@ export class VoiceService {
 
   async start(callbacks: {
     history?: any[];
+    userName?: string;
     onTranscription?: (text: string, role: "user" | "model") => void;
     onError?: (error: any) => void;
     onClose?: () => void;
@@ -197,44 +198,73 @@ export class VoiceService {
 
       // Send history (if any) + greeting as a single combined turn.
       // History MUST arrive before the greeting so the model has full context
-      // before it opens its mouth. Previously history was sent at 1200ms AFTER
-      // the greeting at 200ms — the model would start fresh every voice session.
+      // before it opens its mouth.
       setTimeout(() => {
         if (!this.isConnected || !this.ws) return;
 
         const history = callbacks.history || [];
+        const userName = callbacks.userName || "";
 
         if (history.length > 0) {
-          // Build compact history string; keep the MOST RECENT messages if truncating
-          let historyText = history
-            .map(
-              (m: any) =>
-                `${m.role === "assistant" ? "ג'ורג' מקינזי" : "משתמש"}: ${m.content}`
-            )
+          const MAX_CHARS = 20000;
+
+          // Separate file/document messages from regular conversation
+          const fileMessages = history.filter((m: any) =>
+            typeof m.content === "string" && m.content.includes("[תיק לקוח הועלה:")
+          );
+          const regularMessages = history.filter((m: any) =>
+            !(typeof m.content === "string" && m.content.includes("[תיק לקוח הועלה:"))
+          );
+
+          // Build file context (priority — always included first)
+          let fileContext = fileMessages
+            .map((m: any) => `${m.role === "assistant" ? "ג'ורג' מקינזי" : "משתמש"}: ${m.content}`)
             .join("\n");
-          if (historyText.length > 10000) {
-            historyText =
-              "... (היסטוריה מקוצרת)\n" +
-              historyText.substring(historyText.length - 10000);
+
+          // Reserve up to 60% of budget for file content, rest for conversation
+          const fileLimit = Math.floor(MAX_CHARS * 0.6);
+          const convLimit = MAX_CHARS - Math.min(fileContext.length, fileLimit);
+
+          if (fileContext.length > fileLimit) {
+            fileContext = "... (תיק לקוח מקוצר)\n" + fileContext.substring(fileContext.length - fileLimit);
           }
 
-          // One combined instruction: absorb context → greet → listen
+          let conversationText = regularMessages
+            .map((m: any) => `${m.role === "assistant" ? "ג'ורג' מקינזי" : "משתמש"}: ${m.content}`)
+            .join("\n");
+
+          if (conversationText.length > convLimit) {
+            conversationText =
+              "... (היסטוריה מקוצרת)\n" +
+              conversationText.substring(conversationText.length - convLimit);
+          }
+
+          let historyText = "";
+          if (fileContext) historyText += `--- תיקי לקוח ומסמכים שהועלו ---\n${fileContext}\n\n`;
+          if (conversationText) historyText += `--- היסטוריית השיחה ---\n${conversationText}`;
+
+          const greeting = userName
+            ? `"שלום ${userName}, אני כאן."`
+            : `"אני כאן, אפשר לדבר איתי."`;
+
           this.ws.send(
             JSON.stringify({
               type: "text",
               payload: {
-                text:
-                  `להלן היסטוריית השיחה הטקסטואלית עד כה. קרא אותה, זכור את כל ההקשר, ואז אמור בדיוק ורק: "אני כאן, אפשר לדבר איתי." ואז השתתק ותקשיב.\n\n${historyText}`,
+                text: `להלן היסטוריית השיחה הטקסטואלית עד כה, כולל תיקי לקוח שהועלו. קרא הכל, זכור את כל ההקשר והמסמכים, ואז אמור בדיוק ורק: ${greeting} ואז השתתק ותקשיב.\n\n${historyText}`,
               },
             })
           );
         } else {
-          // No prior history — plain greeting only
+          const greeting = userName
+            ? `"היי ${userName}! אני ג'ורג'. ספר לי, על מה נעבוד היום?"`
+            : `"היי, אני ג'ורג'. ספר לי, על מה נעבוד היום?"`;
+
           this.ws.send(
             JSON.stringify({
               type: "text",
               payload: {
-                text: "אמור עכשיו בדיוק את המשפט הזה ולא יותר: 'אני כאן, אפשר לדבר איתי.' ואז השתתק ותקשיב.",
+                text: `ברך את המשתמש בחמימות. אמור: ${greeting} ואז שתוק ותקשיב.`,
               },
             })
           );

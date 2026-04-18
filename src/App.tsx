@@ -77,11 +77,64 @@ export default function App() {
   const [subStatus, setSubStatus] = useState<SubStatus>('loading');
   const [subscription, setSubscription] = useState<any>(null);
   const [recheckKey, setRecheckKey] = useState(0);
+  const [autoVoice, setAutoVoice] = useState(false);
+  const chatRef = React.useRef<any>(null);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, setUser);
     return unsub;
   }, []);
+
+  // Detect ?autovoice=1 (set when voice popup opens from iframe)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('autovoice') === '1') setAutoVoice(true);
+  }, []);
+
+  // Once user is signed in and autoVoice is requested, request history from opener then start voice
+  useEffect(() => {
+    if (!autoVoice || !user || !chatRef.current) return;
+
+    if (window.opener) {
+      let handled = false;
+
+      const handleHistory = (e: MessageEvent) => {
+        if (e.data?.type === 'voice_history_response' && !handled) {
+          handled = true;
+          window.removeEventListener('message', handleHistory);
+          clearTimeout(fallback);
+          chatRef.current?.startVoiceWithHistory(e.data.history || []);
+          setAutoVoice(false);
+        }
+      };
+
+      window.addEventListener('message', handleHistory);
+      // Ask the parent iframe for its current chat messages
+      window.opener.postMessage({ type: 'request_voice_history' }, '*');
+
+      // Fallback: if parent doesn't respond in 3s, start with Firestore-loaded messages
+      const fallback = setTimeout(() => {
+        if (!handled) {
+          handled = true;
+          window.removeEventListener('message', handleHistory);
+          chatRef.current?.toggleVoice();
+          setAutoVoice(false);
+        }
+      }, 3000);
+
+      return () => {
+        window.removeEventListener('message', handleHistory);
+        clearTimeout(fallback);
+      };
+    } else {
+      // Direct navigation without opener — start after Firestore load
+      const timer = setTimeout(() => {
+        chatRef.current?.toggleVoice();
+        setAutoVoice(false);
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [autoVoice, user, subStatus]);
 
   // Poll Firestore after returning from Cardcom payment until subscription is active
   useEffect(() => {
@@ -213,18 +266,21 @@ export default function App() {
             <ExternalLink size={15} />
           </button>
           <p className="text-xs text-slate-500 mb-4">לאחר התשלום יש לרענן את הדף.</p>
-          <button
-            onClick={() => { setSubStatus('loading'); setTimeout(() => setRecheckKey(k => k + 1), 200); }}
-            className="text-xs text-slate-400 hover:text-blue-600 underline underline-offset-2"
-          >
-            כבר שילמתי — בדוק שוב
-          </button>
-          <button
-            onClick={() => signOut(auth)}
-            className="text-xs text-slate-400 hover:text-red-500 underline underline-offset-2 mt-1"
-          >
-            התנתק והתחבר עם חשבון אחר
-          </button>
+          <div className="flex items-center justify-center gap-4">
+            <button
+              onClick={() => { setSubStatus('loading'); setTimeout(() => setRecheckKey(k => k + 1), 200); }}
+              className="text-xs text-slate-400 hover:text-blue-600 underline underline-offset-2"
+            >
+              כבר שילמתי — בדוק שוב
+            </button>
+            <span className="text-slate-200">|</span>
+            <button
+              onClick={() => signOut(auth)}
+              className="text-xs text-slate-400 hover:text-red-500 underline underline-offset-2"
+            >
+              התנתקות
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -313,7 +369,7 @@ export default function App() {
           </div>
           {/* Chat SECOND — in RTL flex this places it on the LEFT */}
           <div className="flex-1 min-w-0 h-full overflow-hidden">
-            <Chat externalInput={externalInput} user={user} isDemo={isDemo} subscription={subscription} />
+            <Chat ref={chatRef} externalInput={externalInput} user={user} isDemo={isDemo} subscription={subscription} />
           </div>
         </main>
       </div>

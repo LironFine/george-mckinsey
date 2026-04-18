@@ -683,13 +683,24 @@ async function startServer() {
       }
     });
 
+    // ── Keepalive ping every 20 s — prevents Railway proxy from dropping idle WS ──
+    const pingInterval = setInterval(() => {
+      if (ws.readyState === ws.OPEN) {
+        try { ws.ping(); } catch {}
+      } else {
+        clearInterval(pingInterval);
+      }
+    }, 20000);
+
     ws.on("close", () => {
       console.log("Browser WebSocket closed");
+      clearInterval(pingInterval);
       if (geminiWs.readyState === WsClient.OPEN) geminiWs.close();
     });
 
     ws.on("error", (err) => {
       console.error("Browser WS error:", err);
+      clearInterval(pingInterval);
       if (geminiWs.readyState === WsClient.OPEN) geminiWs.close();
     });
   });

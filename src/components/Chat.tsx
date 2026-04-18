@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { User as FirebaseUser } from 'firebase/auth';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
@@ -13,7 +13,7 @@ import { voiceService } from '../services/voiceService';
 import { checkAndIncrementMonthlyText, checkVoiceMinutesAvailableForUser, recordVoiceUsageForUser, setVisitorId, incrementDemoTextUsage, incrementDemoVoiceUsage, getPurchasedCredits, deductPurchasedText, deductPurchasedVoice } from '../services/usageService';
 import { saveSession, loadSession } from '../services/historyService';
 
-export default function Chat({ externalInput, user, isDemo, subscription }: { externalInput?: string; user?: FirebaseUser | null; isDemo?: boolean; subscription?: any }) {
+const Chat = forwardRef(function Chat({ externalInput, user, isDemo, subscription }: { externalInput?: string; user?: FirebaseUser | null; isDemo?: boolean; subscription?: any }, ref) {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -48,6 +48,31 @@ export default function Chat({ externalInput, user, isDemo, subscription }: { ex
   const saveErrorShownRef = useRef(false);
   // Prevent saving immediately after loading history from Firestore
   const justLoadedRef = useRef(false);
+  // Holds history injected from parent iframe via postMessage (voice popup flow)
+  const voiceHistoryOverrideRef = useRef<any[] | null>(null);
+
+  // ── Expose methods to App.tsx (for voice popup flow) ───────────────────────
+  useImperativeHandle(ref, () => ({
+    toggleVoice,
+    startVoiceWithHistory: (history: any[]) => {
+      voiceHistoryOverrideRef.current = history;
+      toggleVoice();
+    },
+  }));
+
+  // ── Respond to voice popup requesting chat history via postMessage ──────────
+  useEffect(() => {
+    const handleMessage = (e: MessageEvent) => {
+      if (e.data?.type === 'request_voice_history' && e.source) {
+        (e.source as Window).postMessage(
+          { type: 'voice_history_response', history: messagesRef.current },
+          '*'
+        );
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
 
   // ── Load history when user signs in ────────────────────────────────────────
   useEffect(() => {
@@ -111,14 +136,6 @@ export default function Chat({ externalInput, user, isDemo, subscription }: { ex
       handleSend(externalInput);
     }
   }, [externalInput]);
-
-  // Auto-start voice when opened via mic button from iframe (?autovoice=1)
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('autovoice') !== '1') return;
-    const t = setTimeout(() => { toggleVoice(); }, 2500);
-    return () => clearTimeout(t);
-  }, []); // eslint-disable-line
 
   // After returning from Cardcom payment (?purchase=success) — hide card & clean URL
   useEffect(() => {
@@ -688,8 +705,12 @@ ${voiceUserLines.join('\n')}
       voiceStartTimeRef.current = Date.now();
       setIsVoiceActive(true);
 
+      const voiceHistory = voiceHistoryOverrideRef.current ?? messagesRef.current;
+      voiceHistoryOverrideRef.current = null;
+
       await voiceService.start({
-        history: messagesRef.current, // always fresh — avoids stale closure in autovoice
+        history: voiceHistory,
+        userName: user?.displayName || "",
         onTranscription: (text, role) => {
           const voiceMsg: Message = {
             id: `voice-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -1025,4 +1046,6 @@ ${voiceUserLines.join('\n')}
       </div>
     </div>
   );
-}
+});
+
+export default Chat;
