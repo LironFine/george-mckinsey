@@ -187,7 +187,7 @@ export async function checkAndIncrementVoiceUsage(): Promise<{
 
 // ── Demo usage (Firestore — lifetime per user) ──────────────────────
 
-const DEMO_TEXT_LIMIT = 20;
+const DEMO_TEXT_LIMIT = 30;
 const DEMO_VOICE_LIMIT = 2;
 
 interface DemoUsage {
