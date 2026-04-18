@@ -258,34 +258,47 @@ async function startServer() {
   });
 
   // POST/GET /api/cardcom-subscription-ipn
-  // Cardcom calls this after each successful recurring charge.
-  // Identifies subscription IPNs by ReturnValue starting with "sub_".
+  // Cardcom הוראת קבע sends a subscription-status IPN (not a payment IPN).
+  // Fields: RecurringId, IsActive, acc.Email, acc.CompanyName — no ReturnValue.
+  // We identify the user by email via Firebase Admin Auth.
   const handleSubscriptionIpn = async (req: express.Request, res: express.Response) => {
     const body = { ...req.query, ...req.body } as Record<string, string>;
-    const { RetCode, ReturnValue, DealNumber } = body;
-    console.log("[SubIPN] Received:", { RetCode, ReturnValue, DealNumber });
-    console.log("[SubIPN] Full body keys:", Object.keys(req.body || {}));
-    console.log("[SubIPN] Full query keys:", Object.keys(req.query || {}));
-    console.log("[SubIPN] Content-Type:", req.headers["content-type"]);
+    const email       = body["acc.Email"]  || "";
+    const isActive    = body["IsActive"]   || "";
+    const recurringId = body["RecurringId"] || body["RecordType"] || "";
+    console.log("[SubIPN] Received:", { email, isActive, recurringId });
 
-    if (String(RetCode) !== "0") return res.send("FAILED");
-    // Only process IPNs that were created by our create-subscription endpoint
-    if (!ReturnValue || !ReturnValue.startsWith("sub_")) return res.send("NOT_SUBSCRIPTION");
-    const uid = ReturnValue.slice(4); // strip "sub_" prefix
-    if (!uid)    return res.send("NO_UID");
+    if (!email) {
+      console.warn("[SubIPN] No email in body — unknown user");
+      return res.send("NO_EMAIL");
+    }
     if (!adminDb) return res.status(500).send("DB_NOT_INITIALIZED");
 
+    // Look up Firebase UID by email
+    let uid: string;
+    try {
+      const userRecord = await admin.auth().getUserByEmail(email);
+      uid = userRecord.uid;
+    } catch (err: any) {
+      console.error("[SubIPN] User not found for email:", email, err.message);
+      return res.send("USER_NOT_FOUND");
+    }
+
+    // IsActive='1' → activate; IsActive='0' → cancel
+    const newStatus = isActive === "1" ? "active" : "cancelled";
     try {
       await adminDb.doc(`users/${uid}`).set({
         subscription: {
-          status: "active",
-          cardcomDealNumber: String(DealNumber || ""),
-          currentPeriodEnd: Date.now() + 31 * 24 * 60 * 60 * 1000,
-          activatedAt: Date.now(),
-          cancelledAt: null,
+          status: newStatus,
+          cardcomRecurringId: recurringId,
+          currentPeriodEnd: newStatus === "active"
+            ? Date.now() + 31 * 24 * 60 * 60 * 1000
+            : (await adminDb.doc(`users/${uid}`).get()).data()?.subscription?.currentPeriodEnd ?? Date.now(),
+          activatedAt: newStatus === "active" ? Date.now() : undefined,
+          cancelledAt: newStatus === "cancelled" ? Date.now() : null,
         }
       }, { merge: true });
-      console.log(`[SubIPN] Subscription activated → ${uid}`);
+      console.log(`[SubIPN] Subscription ${newStatus} → ${uid} (${email})`);
       return res.send("OK");
     } catch (err: any) {
       console.error("[SubIPN] Firestore error:", err.message);
