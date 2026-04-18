@@ -1,5 +1,5 @@
 import React, { useState, useEffect, Component, ErrorInfo, ReactNode } from 'react';
-import { onAuthStateChanged, User } from 'firebase/auth';
+import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { doc, getDocFromServer } from 'firebase/firestore';
 import { auth, db } from './lib/firebase';
 import Chat from './components/Chat';
@@ -218,6 +218,12 @@ export default function App() {
             className="text-xs text-slate-400 hover:text-blue-600 underline underline-offset-2"
           >
             כבר שילמתי — בדוק שוב
+          </button>
+          <button
+            onClick={() => signOut(auth)}
+            className="text-xs text-slate-400 hover:text-red-500 underline underline-offset-2 mt-1"
+          >
+            התנתק והתחבר עם חשבון אחר
           </button>
         </div>
       </div>
