@@ -32,6 +32,7 @@ async function startServer() {
   const PORT = 3000;
 
   app.use(express.json());
+  app.use(express.urlencoded({ extended: true })); // Cardcom IPN sends form-encoded POST body
 
   // Helper to get the API key safely and cleaned
   const getApiKey = () => {
@@ -263,6 +264,9 @@ async function startServer() {
     const body = { ...req.query, ...req.body } as Record<string, string>;
     const { RetCode, ReturnValue, DealNumber } = body;
     console.log("[SubIPN] Received:", { RetCode, ReturnValue, DealNumber });
+    console.log("[SubIPN] Full body keys:", Object.keys(req.body || {}));
+    console.log("[SubIPN] Full query keys:", Object.keys(req.query || {}));
+    console.log("[SubIPN] Content-Type:", req.headers["content-type"]);
 
     if (String(RetCode) !== "0") return res.send("FAILED");
     // Only process IPNs that were created by our create-subscription endpoint
