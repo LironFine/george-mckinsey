@@ -1,7 +1,8 @@
 import React, { useState, useEffect, Component, ErrorInfo, ReactNode } from 'react';
-import { onAuthStateChanged, signOut, User } from 'firebase/auth';
+import { User } from 'firebase/auth';
 import { doc, getDocFromServer } from 'firebase/firestore';
 import { auth, db } from './lib/firebase';
+import { subscribeAuthSync, signOutSync } from './lib/auth-sync';
 import Chat from './components/Chat';
 import Sidebar from './components/Sidebar';
 import AuthButton from './components/AuthButton';
@@ -81,7 +82,7 @@ export default function App() {
   const chatRef = React.useRef<any>(null);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, setUser);
+    const unsub = subscribeAuthSync(setUser);
     return unsub;
   }, []);
 
@@ -178,8 +179,11 @@ export default function App() {
           setSubStatus('blocked');
         }
       } catch (err) {
-        console.error('[Auth] Subscription check failed:', err);
-        setSubStatus('trial'); // fail-open: allow trial if check fails
+        // Fail-closed: if Firestore is unreachable we can't verify the user
+        // paid or has trial credits left, so block rather than hand out free
+        // access during an outage. User sees the paywall + "check again" button.
+        console.error('[Auth] Subscription check failed — failing closed:', err);
+        setSubStatus('blocked');
       }
     })();
   }, [user?.uid, recheckKey]);
@@ -275,7 +279,7 @@ export default function App() {
             </button>
             <span className="text-slate-200">|</span>
             <button
-              onClick={() => signOut(auth)}
+              onClick={() => signOutSync()}
               className="text-xs text-slate-400 hover:text-red-500 underline underline-offset-2"
             >
               התנתקות

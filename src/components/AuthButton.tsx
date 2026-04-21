@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { signInWithPopup, signOut, GoogleAuthProvider, User } from 'firebase/auth';
-import { auth } from '../lib/firebase';
+import { User } from 'firebase/auth';
+import { signInWithGoogleSync, signOutSync } from '../lib/auth-sync';
 import { LogIn, LogOut, Loader2 } from 'lucide-react';
 
 interface AuthButtonProps {
@@ -13,7 +13,7 @@ export default function AuthButton({ user }: AuthButtonProps) {
   const handleSignIn = async () => {
     setLoading(true);
     try {
-      await signInWithPopup(auth, new GoogleAuthProvider());
+      await signInWithGoogleSync();
     } catch (err: any) {
       // user closed popup or blocked — not a crash
       if (err?.code !== 'auth/popup-closed-by-user' &&
@@ -28,7 +28,7 @@ export default function AuthButton({ user }: AuthButtonProps) {
   const handleSignOut = async () => {
     setLoading(true);
     try {
-      await signOut(auth);
+      await signOutSync();
     } finally {
       setLoading(false);
     }
