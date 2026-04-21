@@ -263,10 +263,28 @@ async function startServer() {
   // We identify the user by email via Firebase Admin Auth.
   const handleSubscriptionIpn = async (req: express.Request, res: express.Response) => {
     const body = { ...req.query, ...req.body } as Record<string, string>;
+
+    // ── Hardening: require a shared secret in the IPN URL so random
+    //    callers can't activate subscriptions for arbitrary emails. The
+    //    secret is configured once on the IPN URL inside Cardcom's
+    //    dashboard (e.g. https://.../api/cardcom-subscription-ipn?ipnSecret=XXX).
+    //    Until you set CARDCOM_IPN_SECRET in Railway and update the URL on
+    //    Cardcom's side, any forged or test call is rejected.
+    const expectedSecret = (process.env.CARDCOM_IPN_SECRET || "").trim();
+    if (expectedSecret) {
+      const got = (body["ipnSecret"] || (req.query.ipnSecret as string) || "").toString();
+      if (got !== expectedSecret) {
+        console.warn("[SubIPN] Rejected — bad/missing ipnSecret. From IP:", req.ip);
+        return res.status(401).send("FORBIDDEN");
+      }
+    } else {
+      console.warn("[SubIPN] CARDCOM_IPN_SECRET not set — endpoint is OPEN. Set it ASAP.");
+    }
+
     const email       = body["acc.Email"]  || "";
     const isActive    = body["IsActive"]   || "";
     const recurringId = body["RecurringId"] || body["RecordType"] || "";
-    console.log("[SubIPN] Received:", { email, isActive, recurringId });
+    console.log("[SubIPN] Received:", { email, isActive, recurringId, ip: req.ip });
 
     if (!email) {
       console.warn("[SubIPN] No email in body — unknown user");
