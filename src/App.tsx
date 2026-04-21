@@ -297,7 +297,7 @@ export default function App() {
     <ErrorBoundary>
       <div className="flex flex-col h-full bg-slate-50 overflow-hidden">
         {/* Header */}
-        <header className="h-14 bg-white border-b border-slate-100 shrink-0 z-50">
+        <header className="h-12 bg-white border-b border-slate-100 shrink-0 z-50">
           <div className="flex h-full max-w-7xl mx-auto w-full px-2 lg:px-4 gap-6">
             {/* Desktop RIGHT (first in RTL, w-72): title — sits above the sidebar */}
             <div className="hidden lg:flex shrink-0 w-72 items-center gap-2">
