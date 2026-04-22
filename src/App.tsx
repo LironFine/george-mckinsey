@@ -6,7 +6,7 @@ import { subscribeAuthSync, signOutSync } from './lib/auth-sync';
 import Chat from './components/Chat';
 import Sidebar from './components/Sidebar';
 import AuthButton from './components/AuthButton';
-import { Briefcase, X, AlertTriangle, ExternalLink, Sparkles } from 'lucide-react';
+import { Briefcase, X, AlertTriangle, ExternalLink, Sparkles, FileText, Cloud, LayoutList, ClipboardList, RefreshCw, Calendar } from 'lucide-react';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -358,6 +358,52 @@ export default function App() {
               <button onClick={() => setIsMobileMenuOpen(false)} className="p-2 text-slate-400 hover:text-slate-600 bg-slate-50 rounded-full">
                 <X size={20} />
               </button>
+            </div>
+            {/* Mobile-only: chat actions moved here from below the input
+                so the chat itself gets ~100px more vertical room. */}
+            <div className="shrink-0 px-4 pt-3 pb-4 border-b border-slate-100 space-y-2">
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                פעולות מהירות
+              </p>
+              <button
+                onClick={() => { chatRef.current?.triggerUploadClient?.(); setIsMobileMenuOpen(false); }}
+                className="w-full flex items-center gap-2 px-3 py-2 bg-blue-50 text-blue-700 rounded-xl text-xs font-medium hover:bg-blue-100 border border-blue-100"
+              >
+                <FileText size={14} />
+                <span>העלאת תיק לקוח</span>
+              </button>
+              <button
+                onClick={() => { chatRef.current?.triggerUpdateClientFile?.(); setIsMobileMenuOpen(false); }}
+                className="w-full flex items-center gap-2 px-3 py-2 bg-slate-50 text-slate-700 rounded-xl text-xs font-medium hover:bg-slate-100 border border-slate-200"
+              >
+                {chatRef.current?.hasUser ? <Cloud size={14} /> : <LayoutList size={14} />}
+                <span>{chatRef.current?.hasUser ? 'שמור + הורד תיק לקוח' : 'עדכון תיק לקוח'}</span>
+              </button>
+              <button
+                onClick={() => { chatRef.current?.triggerDownloadBrief?.(); setIsMobileMenuOpen(false); }}
+                className="w-full flex items-center gap-2 px-3 py-2 bg-indigo-50 text-indigo-700 rounded-xl text-xs font-medium hover:bg-indigo-100 border border-indigo-100"
+              >
+                <ClipboardList size={14} />
+                <span>הורדת בריף לקופירייטר</span>
+              </button>
+              <button
+                onClick={() => { chatRef.current?.triggerNewChat?.(); setIsMobileMenuOpen(false); }}
+                className="w-full flex items-center gap-2 px-3 py-2 bg-red-50 text-red-700 rounded-xl text-xs font-medium hover:bg-red-100 border border-red-100"
+              >
+                <RefreshCw size={14} />
+                <span>שיחה חדשה</span>
+              </button>
+              <a
+                href="https://secure.cardcom.solutions/e/e0aOwzLUH0CdpZ9hf0Rd8w"
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setIsMobileMenuOpen(false)}
+                className="w-full flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl text-xs font-medium shadow-sm"
+              >
+                <Calendar size={14} />
+                <span className="flex-1">פגישה עם לירון פיין</span>
+                <ExternalLink size={12} className="opacity-70" />
+              </a>
             </div>
             <div className="flex-1 overflow-hidden">
               <Sidebar onSelectModel={handleSelectModel} isMobile />

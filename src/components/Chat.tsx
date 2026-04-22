@@ -58,6 +58,14 @@ const Chat = forwardRef(function Chat({ externalInput, user, isDemo, subscriptio
       voiceHistoryOverrideRef.current = history;
       toggleVoice();
     },
+    // Expose chat actions so the mobile sidebar drawer (rendered in
+    // App.tsx) can trigger them — we hide the in-Chat buttons on mobile
+    // to give the messages area more breathing room.
+    triggerNewChat: () => handleNewChat(),
+    triggerUpdateClientFile: () => handleUpdateClientFile(),
+    triggerDownloadBrief: () => handleDownloadBrief(),
+    triggerUploadClient: () => fileInputRef.current?.click(),
+    hasUser: !!user,
   }));
 
   // ── Respond to voice popup requesting chat history via postMessage ──────────
@@ -972,8 +980,10 @@ ${voiceUserLines.join('\n')}
           </div>
         )}
 
-        {/* Action Buttons - Moved below input */}
-        <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-1.5 sm:gap-2 max-w-4xl mx-auto" role="group" aria-label="פעולות מהירות">
+        {/* Action Buttons — desktop only. On mobile these live inside the
+            "ארגז הכלים" drawer (see App.tsx mobile overlay) so the chat
+            area gets ~100px more height. */}
+        <div className="hidden md:flex md:flex-wrap gap-1.5 sm:gap-2 max-w-4xl mx-auto" role="group" aria-label="פעולות מהירות">
           <button
             onClick={() => fileInputRef.current?.click()}
             className="flex items-center justify-center gap-1.5 px-2 py-1.5 sm:px-4 sm:py-2 bg-blue-50 text-blue-700 rounded-full text-[9px] sm:text-[11px] font-medium hover:bg-blue-100 transition-colors border border-blue-100"
