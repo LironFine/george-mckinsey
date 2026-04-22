@@ -761,7 +761,7 @@ ${voiceUserLines.join('\n')}
   const isInIframe = window.self !== window.top;
 
   return (
-    <div className="flex flex-col h-full glass-panel rounded-3xl overflow-hidden">
+    <div className="flex flex-col h-full glass-panel rounded-3xl overflow-hidden overflow-x-hidden">
       {/* Voice Status Overlay */}
       {isVoiceActive && (
         <div 
@@ -786,7 +786,7 @@ ${voiceUserLines.join('\n')}
 
       {/* Messages Area - Increased height by making it flex-1 and ensuring parent is h-full */}
       <div 
-        className="flex-1 overflow-y-auto p-3 sm:p-6 scrollbar-thin scrollbar-thumb-slate-200"
+        className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6 scrollbar-thin scrollbar-thumb-slate-200"
         role="log"
         aria-label="היסטוריית צ'אט"
         aria-live="polite"
