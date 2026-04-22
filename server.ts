@@ -346,6 +346,44 @@ async function startServer() {
   app.post("/api/cardcom-subscription-ipn", handleSubscriptionIpn);
   app.get("/api/cardcom-subscription-ipn",  handleSubscriptionIpn);
 
+  // POST /api/admin/cancel-recurring  body: { recurringId, secret }
+  // Server-to-server cancel — used by Yael's admin dashboard so Cardcom
+  // credentials stay in George only. Idempotent: if Cardcom rejects we
+  // surface the response text to the caller.
+  app.post("/api/admin/cancel-recurring", async (req, res) => {
+    const secret = (req.query.secret as string) || (req.body?.secret as string) || "";
+    const expected = (process.env.ADMIN_SECRET || "").trim();
+    if (!expected || secret !== expected) return res.status(401).json({ error: "unauthorized" });
+    const recurringId = (req.body?.recurringId as string) || (req.query.recurringId as string) || "";
+    if (!recurringId) return res.status(400).json({ error: "missing recurringId" });
+    if (recurringId === "manual" || recurringId.startsWith("manual-")) {
+      // Nothing to cancel on Cardcom's side — these were grant-only
+      return res.json({ ok: true, skipped: "manual provision, nothing to cancel at Cardcom" });
+    }
+    if (!process.env.CARDCOM_TERMINAL) {
+      return res.status(500).json({ error: "CARDCOM_TERMINAL not configured" });
+    }
+    try {
+      const params = new URLSearchParams({
+        TerminalCode: process.env.CARDCOM_TERMINAL,
+        RecurringId:  String(recurringId),
+        APILevel:     "10",
+        APIName:      process.env.CARDCOM_API_NAME     || "",
+        APIPassword:  process.env.CARDCOM_API_PASSWORD || "",
+      });
+      const r = await fetch(`https://secure.cardcom.solutions/interface/CancelRecurring.aspx?${params}`);
+      const text = await r.text();
+      console.log("[admin-cancel-recurring]", recurringId, "→", text);
+      // Cardcom returns "ResponseCode=0" on success (in URL-encoded form)
+      const ok = /ResponseCode=0\b/.test(text) || /Success/i.test(text);
+      if (!ok) return res.status(502).json({ error: "Cardcom rejected", cardcomResponse: text });
+      return res.json({ ok: true, cardcomResponse: text });
+    } catch (err: any) {
+      console.error("[admin-cancel-recurring] failed:", err);
+      return res.status(500).json({ error: err?.message || "unknown" });
+    }
+  });
+
   // GET /api/admin/activate-subscription?uid=xxx&secret=yyy
   // Temporary manual activation for testing (protected by ADMIN_SECRET env var).
   app.get("/api/admin/activate-subscription", async (req, res) => {
