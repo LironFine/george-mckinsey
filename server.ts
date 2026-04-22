@@ -502,7 +502,7 @@ async function startServer() {
       ⚠️ כל המידע שיש למערכת על העסק שלך יימחק מהזיכרון מיידית לצמיתות על מנת להבטיח את הפרטיות שלך, ואי אפשר יהיה לשחזר אותו או להתחיל מחדש תוכנית ניסיון.
     </div>
     <button class="btn btn-danger" onclick="confirmCancel()">בטוח, מחק אותי עכשיו</button>
-    <button class="btn btn-secondary" onclick="location.href='https://www.pirsoomai.com/vpmarketing'">אני רוצה להמשיך לעבוד</button>
+    <button class="btn btn-secondary" onclick="window.top.location.href='https://www.pirsoomai.com/vpmarketing'">אני רוצה להמשיך לעבוד</button>
   </div>
 
   <!-- Confirming -->
