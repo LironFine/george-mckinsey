@@ -20,14 +20,19 @@ const MONTHLY_VOICE_MINUTES_LIMIT = 90;
 export async function checkAndIncrementMonthlyText(uid: string): Promise<{ allowed: boolean; remaining: number }> {
   if (!db || !uid) return { allowed: true, remaining: MONTHLY_TEXT_LIMIT };
   try {
-    const fieldName = `freeText_${getMonthKey()}`;
+    const monthField = `freeText_${getMonthKey()}`;
+    const dayField = `daily_${getDayKey()}_text`;
     const ref = doc(db, 'users', uid);
     const snap = await getDoc(ref);
-    const used = Number((snap.data() || {})[fieldName] || 0);
+    const used = Number((snap.data() || {})[monthField] || 0);
     if (used >= MONTHLY_TEXT_LIMIT) return { allowed: false, remaining: 0 };
-    await updateDoc(ref, { [fieldName]: increment(1) }).catch(async () => {
-      // Document might not exist yet — create it first
-      await setDoc(ref, { [fieldName]: 1 }, { merge: true });
+    // Single write — bump both monthly + daily so the admin dashboard can
+    // resolve usage at day granularity (24h/7d/30d windows).
+    await updateDoc(ref, {
+      [monthField]: increment(1),
+      [dayField]: increment(1),
+    }).catch(async () => {
+      await setDoc(ref, { [monthField]: 1, [dayField]: 1 }, { merge: true });
     });
     return { allowed: true, remaining: MONTHLY_TEXT_LIMIT - used - 1 };
   } catch {
@@ -86,6 +91,13 @@ function getMonthKey(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
 
+/** Local YYYY-MM-DD — used by the admin dashboard to compute 24h/7d/30d
+ *  windows that the monthly counters can't answer on their own. */
+function getDayKey(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
 function getDaysUntilReset(): number {
   const now = new Date();
   const firstOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
@@ -125,9 +137,16 @@ export async function recordVoiceUsageForUser(uid: string, startTime: number): P
   try {
     const elapsedMinutes = (Date.now() - startTime) / 60000;
     if (elapsedMinutes < 5 / 60) return; // ignore sessions under 5 seconds
-    const fieldName = `freeVoice_${getMonthKey()}_min`;
-    await updateDoc(doc(db, 'users', uid), { [fieldName]: increment(elapsedMinutes) }).catch(async () => {
-      await setDoc(doc(db, 'users', uid), { [fieldName]: elapsedMinutes }, { merge: true });
+    const monthField = `freeVoice_${getMonthKey()}_min`;
+    const dayField = `daily_${getDayKey()}_voice_min`;
+    await updateDoc(doc(db, 'users', uid), {
+      [monthField]: increment(elapsedMinutes),
+      [dayField]: increment(elapsedMinutes),
+    }).catch(async () => {
+      await setDoc(doc(db, 'users', uid), {
+        [monthField]: elapsedMinutes,
+        [dayField]: elapsedMinutes,
+      }, { merge: true });
     });
   } catch {
     // Fail silently
